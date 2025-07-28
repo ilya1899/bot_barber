@@ -15,8 +15,8 @@ my_bookings_router = Router()
 
 
 class MyBookingsState(StatesGroup):
-    viewing_bookings_list = State()
-    viewing_single_booking = State()
+    viewingBookingsList = State()
+    viewingSingleBooking = State()
 
 
 @my_bookings_router.message(F.text == "🗓 Мои записи")
@@ -43,12 +43,12 @@ async def handler_my_bookings_list(message: Message, session_maker: callable, st
         "Выберите запись для просмотра деталей:",
         reply_markup=create_bookings_list_keyboard(sorted_bookings, 0)
     )
-    await state.set_state(MyBookingsState.viewing_bookings_list)
+    await state.set_state(MyBookingsState.viewingBookingsList)
 
 
-@my_bookings_router.callback_query(MyBookingsState.viewing_bookings_list, F.data.startswith("bookings_page_"))
+@my_bookings_router.callback_query(MyBookingsState.viewingBookingsList, F.data.startswith("bookingsPage_"))
 async def handler_paginate_bookings(callback: CallbackQuery, state: FSMContext, session_maker: callable):
-    page = int(callback.data.split("_")[2])
+    page = int(callback.data.split("_")[1])
     user_id = callback.from_user.id
 
     async with session_maker() as session:
@@ -64,9 +64,9 @@ async def handler_paginate_bookings(callback: CallbackQuery, state: FSMContext, 
     await callback.answer()
 
 
-@my_bookings_router.callback_query(MyBookingsState.viewing_bookings_list, F.data.startswith("view_booking_"))
+@my_bookings_router.callback_query(MyBookingsState.viewingBookingsList, F.data.startswith("viewBooking_"))
 async def handler_view_single_booking(callback: CallbackQuery, state: FSMContext, session_maker: callable):
-    booking_id = int(callback.data.split("_")[2])
+    booking_id = int(callback.data.split("_")[1])
 
     async with session_maker() as session:
         booking = await db_requests.get_booking_by_id(session, booking_id)
@@ -90,17 +90,15 @@ async def handler_view_single_booking(callback: CallbackQuery, state: FSMContext
         f"Статус: <b>{booking.status}</b>\n"
     )
 
-    # Вызов функции из kbInline.py для создания клавиатуры деталей записи
     await state.update_data(current_viewed_booking_id=booking_id)
-    await callback.message.edit_text(booking_info_text, reply_markup=single_booking_details_keyboard(
-        booking))  # <-- Вызов функции из kbInline.py
-    await state.set_state(MyBookingsState.viewing_single_booking)
+    await callback.message.edit_text(booking_info_text, reply_markup=single_booking_details_keyboard(booking))
+    await state.set_state(MyBookingsState.viewingSingleBooking)
     await callback.answer()
 
 
-@my_bookings_router.callback_query(MyBookingsState.viewing_single_booking, F.data.startswith("cancel_single_booking_"))
+@my_bookings_router.callback_query(MyBookingsState.viewingSingleBooking, F.data.startswith("cancelSingleBooking_"))
 async def handler_cancel_single_booking(callback: CallbackQuery, state: FSMContext, session_maker: callable):
-    booking_id = int(callback.data.split("_")[3])
+    booking_id = int(callback.data.split("_")[1])
     user_id = callback.from_user.id
 
     async with session_maker() as session:
@@ -128,9 +126,9 @@ async def handler_cancel_single_booking(callback: CallbackQuery, state: FSMConte
     await callback.answer()
 
 
-@my_bookings_router.callback_query(MyBookingsState.viewing_single_booking, F.data.startswith("repeat_booking_"))
+@my_bookings_router.callback_query(MyBookingsState.viewingSingleBooking, F.data.startswith("repeatBooking_"))
 async def handler_repeat_booking(callback: CallbackQuery, state: FSMContext, session_maker: callable):
-    booking_id = int(callback.data.split("_")[2])
+    booking_id = int(callback.data.split("_")[1])
     user_id = callback.from_user.id
 
     async with session_maker() as session:
@@ -150,27 +148,22 @@ async def handler_repeat_booking(callback: CallbackQuery, state: FSMContext, ses
         )
 
     await callback.message.edit_text("Выберите новую дату для повторной записи:", reply_markup=calendar_keyboard())
-    await state.set_state(BookingState.choosing_date)
+    await state.set_state(BookingState.choosingDate)
     await callback.answer("Начинаем повторную запись.")
 
 
-@my_bookings_router.callback_query(MyBookingsState.viewing_single_booking, F.data == "back_to_bookings_list")
+@my_bookings_router.callback_query(MyBookingsState.viewingSingleBooking, F.data == "backToBookingsList")
 async def handler_back_to_bookings_list(callback: CallbackQuery, state: FSMContext, session_maker: callable):
     user_id = callback.from_user.id
     async with session_maker() as session:
         bookings = await db_requests.get_user_bookings(session, user_id)
-
-    future_bookings = sorted([b for b in bookings if b.booking_date >= datetime.now()], key=lambda x: x.booking_date)
-    past_bookings = sorted([b for b in bookings if b.booking_date < datetime.now()], key=lambda x: x.booking_date,
-                           reverse=True)
-    sorted_bookings = future_bookings + past_bookings
 
     current_page = (await state.get_data()).get('current_bookings_page', 0)
 
     await callback.message.edit_text(
         "Ваши записи (сортировка по дате):\n\n"
         "Выберите запись для просмотра деталей:",
-        reply_markup=create_bookings_list_keyboard(sorted_bookings, current_page)
+        reply_markup=create_bookings_list_keyboard(bookings, current_page)
     )
-    await state.set_state(MyBookingsState.viewing_bookings_list)
+    await state.set_state(MyBookingsState.viewingBookingsList)
     await callback.answer()

@@ -10,16 +10,16 @@ from app.database import requests as db_requests
 registration_router = Router()
 
 class RegistrationState(StatesGroup):
-    waiting_for_name = State()
-    waiting_for_phone = State()
+    waitingForName = State() # <-- camelCase
+    waitingForPhone = State() # <-- camelCase
 
-@registration_router.callback_query(F.data == "continue_registration")
+@registration_router.callback_query(F.data == "continueRegistration")
 async def handler_continue_registration(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text("Отлично! Как вас зовут? Напишите ваше имя:")
-    await state.set_state(RegistrationState.waiting_for_name)
+    await state.set_state(RegistrationState.waitingForName) # <-- camelCase
     await callback.answer()
 
-@registration_router.message(RegistrationState.waiting_for_name)
+@registration_router.message(RegistrationState.waitingForName) # <-- camelCase
 async def handler_get_name(message: Message, state: FSMContext):
     user_name = message.text.strip()
     if not user_name:
@@ -32,9 +32,9 @@ async def handler_get_name(message: Message, state: FSMContext):
         "Теперь, пожалуйста, поделитесь своим номером телефона, чтобы мы могли с вами связаться.",
         reply_markup=request_contact_keyboard
     )
-    await state.set_state(RegistrationState.waiting_for_phone)
+    await state.set_state(RegistrationState.waitingForPhone)
 
-@registration_router.message(RegistrationState.waiting_for_phone, F.contact)
+@registration_router.message(RegistrationState.waitingForPhone, F.contact)
 async def handler_get_phone(message: Message, state: FSMContext, session_maker: callable):
     phone_number = message.contact.phone_number
     user_id = message.from_user.id
@@ -58,6 +58,6 @@ async def handler_get_phone(message: Message, state: FSMContext, session_maker: 
     )
     await state.clear()
 
-@registration_router.message(RegistrationState.waiting_for_phone)
+@registration_router.message(RegistrationState.waitingForPhone)
 async def handler_get_phone_text(message: Message):
     await message.answer("Пожалуйста, нажмите кнопку 'Поделиться контактом' или введите корректный номер телефона.")

@@ -1,6 +1,7 @@
 from aiogram import Router
 
-from app.handlers.user import handler_start, handler_appointment, handler_registration, handler_info, handler_support, handlers_my_bookings
+from app.handlers.user import handler_start, handler_appointment, handler_registration, handler_info, handler_support, handlers_my_bookings, handler_more_services
+from app.handlers.admin import handler_services
 
 main_router = Router()
 
@@ -10,4 +11,5 @@ main_router.include_router(handler_appointment.appointment_router)
 main_router.include_router(handler_support.support_router)
 main_router.include_router(handler_info.about_us_router)
 main_router.include_router(handlers_my_bookings.my_bookings_router)
-
+main_router.include_router(handler_more_services.services_router)
+main_router.include_router(handler_services.admin_router)
