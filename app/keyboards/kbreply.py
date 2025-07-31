@@ -14,7 +14,7 @@ main_menu_keyboard = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="💈 Записаться")],
         [KeyboardButton(text="🗓 Мои записи"), KeyboardButton(text="ℹ️ Подробнее об услугах")],
-        [KeyboardButton(text="ℹ️ О нас"), KeyboardButton(text="📞 Поддержка")]
+        [KeyboardButton(text="📞 Поддержка")]
     ],
     resize_keyboard=True,
     input_field_placeholder="Выберите действие из меню"

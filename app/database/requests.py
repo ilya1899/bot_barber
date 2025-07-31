@@ -1,166 +1,377 @@
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, delete
-from app.database.models import User, Service, Barber, Booking, Admin # Импортируем Admin
-from datetime import datetime
-from typing import List, Optional
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy import select, update, delete, and_
+from sqlalchemy.orm import selectinload
+from app.database.models import User, Service, Barber, Booking, Admin, BarberVacation
+from typing import List, Optional, Tuple
+from sqlalchemy import func, extract
+from sqlalchemy.orm import joinedload
+from datetime import date, datetime, timedelta
 
-async def add_user(session: AsyncSession, user_id: int, username: str, first_name: str, last_name: str) -> User:
-    """Добавляет или обновляет пользователя в БД."""
-    stmt = select(User).where(User.user_id == user_id)
-    result = await session.execute(stmt)
-    user = result.scalar_one_or_none()
-    if user:
-        user.username = username
-        user.first_name = first_name
-        user.last_name = last_name
-    else:
-        user = User(user_id=user_id, username=username, first_name=first_name, last_name=last_name)
-        session.add(user)
-    await session.commit()
-    await session.refresh(user)
-    return user
+# Глобальная переменная для хранения фабрики сессий
+_async_session_factory: async_sessionmaker[AsyncSession] | None = None
 
-async def get_user(session: AsyncSession, user_id: int) -> Optional[User]:
-    """Получает пользователя по user_id."""
-    stmt = select(User).where(User.user_id == user_id)
-    result = await session.execute(stmt)
-    return result.scalar_one_or_none()
+def initialize_db_requests(session_factory: async_sessionmaker[AsyncSession]):
+    global _async_session_factory
+    _async_session_factory = session_factory
 
-async def update_user_phone(session: AsyncSession, user_id: int, phone_number: str) -> Optional[User]:
-    """Обновляет номер телефона пользователя."""
-    stmt = update(User).where(User.user_id == user_id).values(phone_number=phone_number).returning(User)
-    result = await session.execute(stmt)
-    user = result.scalar_one_or_none()
-    await session.commit()
-    return user
+# --- Функции для модели User ---
+async def addUser(user_id: int, username: str, firstName: str, lastName: str) -> User:
+    """
+    Добавляет нового пользователя или обновляет существующего в базе данных.
+    """
+    if _async_session_factory is None:
+        raise RuntimeError("Фабрика сессий базы данных не инициализирована.")
+    async with _async_session_factory() as session:
+        stmt = select(User).where(User.user_id == user_id)
+        result = await session.execute(stmt)
+        user = result.scalar_one_or_none()
+        if user:
+            user.username = username
+            user.first_name = firstName
+            user.last_name = lastName
+        else:
+            user = User(user_id=user_id, username=username, first_name=firstName, last_name=lastName)
+            session.add(user)
+        await session.commit()
+        await session.refresh(user)
+        return user
 
-async def update_user_name(session: AsyncSession, user_id: int, first_name: str) -> Optional[User]:
-    """Обновляет имя пользователя."""
-    stmt = update(User).where(User.user_id == user_id).values(first_name=first_name).returning(User)
-    result = await session.execute(stmt)
-    user = result.scalar_one_or_none()
-    await session.commit()
-    return user
+async def getUser(user_id: int) -> Optional[User]:
+    """
+    Получает пользователя по его Telegram ID.
+    """
+    if _async_session_factory is None:
+        raise RuntimeError("Фабрика сессий базы данных не инициализирована.")
+    async with _async_session_factory() as session:
+        stmt = select(User).where(User.user_id == user_id)
+        result = await session.execute(stmt)
+        return result.scalar_one_or_none()
 
-async def add_service(session: AsyncSession, name: str, price: int, description: str, duration_hours: int) -> Service:
-    """Добавляет новую услугу."""
-    service = Service(name=name, price=price, description=description, duration_hours=duration_hours)
-    session.add(service)
-    await session.commit()
-    await session.refresh(service)
-    return service
+async def updateUserPhone(user_id: int, phoneNumber: str) -> Optional[User]:
+    """
+    Обновляет номер телефона пользователя.
+    """
+    if _async_session_factory is None:
+        raise RuntimeError("Фабрика сессий базы данных не инициализирована.")
+    async with _async_session_factory() as session:
+        stmt = update(User).where(User.user_id == user_id).values(phone_number=phoneNumber).returning(User)
+        result = await session.execute(stmt)
+        user = result.scalar_one_or_none()
+        await session.commit()
+        return user
 
-async def get_services(session: AsyncSession) -> List[Service]:
-    """Получает все услуги."""
-    stmt = select(Service)
-    result = await session.execute(stmt)
-    return result.scalars().all()
+async def updateUserName(user_id: int, firstName: str) -> Optional[User]:
+    """
+    Обновляет имя пользователя.
+    """
+    if _async_session_factory is None:
+        raise RuntimeError("Фабрика сессий базы данных не инициализирована.")
+    async with _async_session_factory() as session:
+        stmt = update(User).where(User.user_id == user_id).values(first_name=firstName).returning(User)
+        result = await session.execute(stmt)
+        user = result.scalar_one_or_none()
+        await session.commit()
+        return user
 
-async def get_service_by_id(session: AsyncSession, service_id: int) -> Optional[Service]:
-    """Получает услугу по ID."""
-    stmt = select(Service).where(Service.id == service_id)
-    result = await session.execute(stmt)
-    return result.scalar_one_or_none()
+# --- Функции для модели Service ---
+async def addService(name: str, price: int, description: str, durationHours: int) -> Service:
+    """
+    Добавляет новую услугу в базу данных.
+    """
+    if _async_session_factory is None:
+        raise RuntimeError("Фабрика сессий базы данных не инициализирована.")
+    async with _async_session_factory() as session:
+        service = Service(name=name, price=price, description=description, duration_hours=durationHours)
+        session.add(service)
+        await session.commit()
+        await session.refresh(service)
+        return service
 
-async def delete_service(session: AsyncSession, service_id: int) -> bool:
-    """Удаляет услугу по ID."""
-    stmt = delete(Service).where(Service.id == service_id)
-    result = await session.execute(stmt)
-    await session.commit()
-    return result.rowcount > 0
+async def getServices() -> List[Service]:
+    """
+    Получает список всех услуг из базы данных.
+    """
+    if _async_session_factory is None:
+        raise RuntimeError("Фабрика сессий базы данных не инициализирована.")
+    async with _async_session_factory() as session:
+        stmt = select(Service)
+        result = await session.execute(stmt)
+        return result.scalars().all()
 
-async def add_barber(session: AsyncSession, name: str, description: str) -> Barber:
-    """Добавляет нового мастера."""
-    barber = Barber(name=name, description=description)
-    session.add(barber)
-    await session.commit()
-    await session.refresh(barber)
-    return barber
+async def getServiceById(service_id: int) -> Optional[Service]:
+    """
+    Получает услугу по ее ID.
+    """
+    if _async_session_factory is None:
+        raise RuntimeError("Фабрика сессий базы данных не инициализирована.")
+    async with _async_session_factory() as session:
+        stmt = select(Service).where(Service.id == service_id)
+        result = await session.execute(stmt)
+        return result.scalar_one_or_none()
 
-async def get_barbers(session: AsyncSession) -> List[Barber]:
-    """Получает всех мастеров."""
-    stmt = select(Barber)
-    result = await session.execute(stmt)
-    return result.scalars().all()
+async def deleteService(service_id: int) -> bool:
+    """
+    Удаляет услугу по ее ID.
+    Возвращает True, если услуга была удалена, иначе False.
+    """
+    if _async_session_factory is None:
+        raise RuntimeError("Фабрика сессий базы данных не инициализирована.")
+    async with _async_session_factory() as session:
+        stmt = delete(Service).where(Service.id == service_id)
+        result = await session.execute(stmt)
+        await session.commit()
+        return result.rowcount > 0
 
-async def get_barber_by_id(session: AsyncSession, barber_id: int) -> Optional[Barber]:
-    """Получает мастера по ID."""
-    stmt = select(Barber).where(Barber.id == barber_id)
-    result = await session.execute(stmt)
-    return result.scalar_one_or_none()
+# --- Функции для модели Barber ---
+async def addBarber(name: str, description: str, photo_id: Optional[str], service_ids: List[int]) -> Barber:
+    if _async_session_factory is None:
+        raise RuntimeError("Фабрика сессий базы данных не инициализирована.")
+    async with _async_session_factory() as session:
+        barber = Barber(name=name, description=description, photo_id=photo_id)
+        session.add(barber)
+        # await session.flush()  # можно закомментировать, если не требуется
 
-async def create_booking(session: AsyncSession, user_id: int, service_id: int, booking_date: datetime, barber_id: Optional[int] = None) -> Booking:
-    """Создает новую запись."""
-    booking = Booking(
-        user_id=user_id,
-        service_id=service_id,
-        booking_date=booking_date,
-        barber_id=barber_id,
-        status="active"
-    )
-    session.add(booking)
-    await session.commit()
-    await session.refresh(booking)
-    await session.refresh(booking, attribute_names=['service', 'barber', 'user'])
-    return booking
+        if service_ids:
+            services_stmt = select(Service).where(Service.id.in_(service_ids))
+            services_result = await session.execute(services_stmt)
+            selected_services = services_result.scalars().all()
+            barber.services.extend(selected_services)
 
-async def get_user_bookings(session: AsyncSession, user_id: int) -> List[Booking]:
-    """Получает все записи пользователя."""
-    stmt = select(Booking).where(Booking.user_id == user_id).order_by(Booking.booking_date)
-    result = await session.execute(stmt)
-    return result.scalars().unique().all()
+        await session.commit()
+        await session.refresh(barber)
+        return barber
 
-async def get_booking_by_id(session: AsyncSession, booking_id: int) -> Optional[Booking]:
-    """Получает запись по ID."""
-    stmt = select(Booking).where(Booking.id == booking_id)
-    result = await session.execute(stmt)
-    return result.scalar_one_or_none()
 
-async def cancel_booking(session: AsyncSession, booking_id: int) -> bool:
-    """Отменяет запись по ID."""
-    stmt = update(Booking).where(Booking.id == booking_id).values(status="cancelled")
-    result = await session.execute(stmt)
-    await session.commit()
-    return result.rowcount > 0
+async def getBarbers() -> List[Barber]:
+    """
+    Получает список всех мастеров, жадно загружая их услуги.
+    """
+    if _async_session_factory is None:
+        raise RuntimeError("Фабрика сессий базы данных не инициализирована.")
+    async with _async_session_factory() as session:
+        stmt = select(Barber).options(selectinload(Barber.services))
+        result = await session.execute(stmt)
+        return result.scalars().unique().all()
+
+async def getBarberById(barber_id: int) -> Optional[Barber]:
+    """
+    Получает мастера по его ID, жадно загружая его услуги.
+    """
+    if _async_session_factory is None:
+        raise RuntimeError("Фабрика сессий базы данных не инициализирована.")
+    async with _async_session_factory() as session:
+        stmt = select(Barber).where(Barber.id == barber_id).options(selectinload(Barber.services))
+        result = await session.execute(stmt)
+        return result.scalar_one_or_none()
+
+async def deleteBarber(barber_id: int) -> bool:
+    """
+    Удаляет мастера по его ID.
+    Возвращает True, если мастер был удален, иначе False.
+    """
+    if _async_session_factory is None:
+        raise RuntimeError("Фабрика сессий базы данных не инициализирована.")
+    async with _async_session_factory() as session:
+        stmt = delete(Barber).where(Barber.id == barber_id)
+        result = await session.execute(stmt)
+        await session.commit()
+        return result.rowcount > 0
+
+async def getServicesByBarberId(barber_id: int) -> List[Service]:
+    """
+    Получает все услуги, предоставляемые конкретным мастером.
+    """
+    if _async_session_factory is None:
+        raise RuntimeError("Фабрика сессий базы данных не инициализирована.")
+    async with _async_session_factory() as session:
+        barber = await session.get(Barber, barber_id, options=[selectinload(Barber.services)])
+        if barber:
+            return list(barber.services)
+        return []
+
+# --- Функции для модели Booking ---
+async def createBooking(user_id: int, service_id: int, booking_date: datetime, barber_id: Optional[int] = None) -> Booking:
+    """
+    Создает новую запись на услугу.
+    """
+    if _async_session_factory is None:
+        raise RuntimeError("Фабрика сессий базы данных не инициализирована.")
+    async with _async_session_factory() as session:
+        booking = Booking(
+            user_id=user_id,
+            service_id=service_id,
+            booking_date=booking_date,
+            barber_id=barber_id,
+            status="active"
+        )
+        session.add(booking)
+        await session.commit()
+        await session.refresh(booking)
+        await session.refresh(booking, attribute_names=['service', 'barber', 'user'])
+        return booking
+
+async def getUserBookings(user_id: int) -> List[Booking]:
+    """
+    Получает все записи для конкретного пользователя, жадно загружая связанные объекты.
+    """
+    if _async_session_factory is None:
+        raise RuntimeError("Фабрика сессий базы данных не инициализирована.")
+    async with _async_session_factory() as session:
+        stmt = select(Booking).where(Booking.user_id == user_id).order_by(Booking.booking_date).options(
+            selectinload(Booking.service),
+            selectinload(Booking.barber),
+            selectinload(Booking.user)
+        )
+        result = await session.execute(stmt)
+        return result.scalars().unique().all()
+
+async def getBookingById(booking_id: int) -> Optional[Booking]:
+    """
+    Получает запись по ее ID, жадно загружая связанные объекты.
+    """
+    if _async_session_factory is None:
+        raise RuntimeError("Фабрика сессий базы данных не инициализирована.")
+    async with _async_session_factory() as session:
+        stmt = select(Booking).where(Booking.id == booking_id).options(
+            selectinload(Booking.service),
+            selectinload(Booking.barber),
+            selectinload(Booking.user)
+        )
+        result = await session.execute(stmt)
+        return result.scalar_one_or_none()
+
+async def cancelBooking(booking_id: int) -> bool:
+    """
+    Отменяет запись по ее ID.
+    Возвращает True, если запись была отменена, иначе False.
+    """
+    if _async_session_factory is None:
+        raise RuntimeError("Фабрика сессий базы данных не инициализирована.")
+    async with _async_session_factory() as session:
+        stmt = update(Booking).where(Booking.id == booking_id).values(status="cancelled")
+        result = await session.execute(stmt)
+        await session.commit()
+        return result.rowcount > 0
 
 # --- Функции для модели Admin ---
-async def add_admin(session: AsyncSession, user_id: int) -> Optional[Admin]:
-    """Добавляет пользователя в список администраторов."""
-    # Проверяем, существует ли пользователь в таблице users
-    user_exists = await session.execute(select(User).where(User.user_id == user_id))
-    if not user_exists.scalar_one_or_none():
-        # Если пользователя нет в users, возможно, его нужно сначала зарегистрировать
-        # Или просто не добавлять в админы, если его нет в основной таблице пользователей
-        print(f"Пользователь с user_id {user_id} не найден в таблице users. Невозможно добавить в админы.")
-        return None
+async def addAdmin(user_id: int) -> Optional[Admin]:
+    """
+    Добавляет пользователя в список администраторов.
+    """
+    if _async_session_factory is None:
+        raise RuntimeError("Фабрика сессий базы данных не инициализирована.")
+    async with _async_session_factory() as session:
+        user_exists_stmt = select(User).where(User.user_id == user_id)
+        user_exists_result = await session.execute(user_exists_stmt)
+        if not user_exists_result.scalar_one_or_none():
+            print(f"Пользователь с user_id {user_id} не найден в таблице users. Невозможно добавить в админы.")
+            return None
 
-    # Проверяем, не является ли уже админом
-    existing_admin = await session.execute(select(Admin).where(Admin.user_id == user_id))
-    if existing_admin.scalar_one_or_none():
-        print(f"Пользователь {user_id} уже является администратором.")
-        return existing_admin.scalar_one_or_none() # Возвращаем существующего админа
+        existing_admin_stmt = select(Admin).where(Admin.user_id == user_id)
+        existing_admin_result = await session.execute(existing_admin_stmt)
+        existing_admin = existing_admin_result.scalar_one_or_none()
+        if existing_admin:
+            print(f"Пользователь {user_id} уже является администратором.")
+            return existing_admin
 
-    admin = Admin(user_id=user_id)
-    session.add(admin)
-    await session.commit()
-    await session.refresh(admin)
-    return admin
+        admin = Admin(user_id=user_id)
+        session.add(admin)
+        await session.commit()
+        await session.refresh(admin)
+        return
 
-async def remove_admin(session: AsyncSession, user_id: int) -> bool:
-    """Удаляет пользователя из списка администраторов."""
-    stmt = delete(Admin).where(Admin.user_id == user_id)
-    result = await session.execute(stmt)
-    await session.commit()
-    return result.rowcount > 0
+async def isUserAdmin(user_id: int) -> bool:
+    """
+    Проверяет, является ли пользователь администратором.
+    """
+    if _async_session_factory is None:
+        raise RuntimeError("Фабрика сессий базы данных не инициализирована.")
+    async with _async_session_factory() as session:
+        stmt = select(Admin).where(Admin.user_id == user_id)
+        result = await session.execute(stmt)
+        return result.scalar_one_or_none() is not None
 
-async def is_user_admin(session: AsyncSession, user_id: int) -> bool:
-    """Проверяет, является ли пользователь администратором."""
-    stmt = select(Admin).where(Admin.user_id == user_id)
-    result = await session.execute(stmt)
-    return result.scalar_one_or_none() is not None
 
-async def get_all_admins(session: AsyncSession) -> List[Admin]:
-    """Получает список всех администраторов."""
-    stmt = select(Admin)
-    result = await session.execute(stmt)
-    return result.scalars().all()
+async def getNewUsersCount(start_date: Optional[date] = None, end_date: Optional[date] = None) -> int:
+    """
+    Возвращает количество новых пользователей за указанный период.
+    Если start_date None, то считается с самого начала.
+    """
+    if _async_session_factory is None:
+        raise RuntimeError("Фабрика сессий базы данных не инициализирована.")
+    async with _async_session_factory() as session:
+        stmt = select(func.count(User.user_id))  # ИСПРАВЛЕНО: Использовать User.user_id
+        if start_date:
+            stmt = stmt.where(User.registration_date >= start_date)
+        if end_date:
+            # Учитываем конец дня для end_date
+            stmt = stmt.where(User.registration_date <= (end_date + timedelta(days=1)))
+
+        result = await session.execute(stmt)
+        return result.scalar_one()
+
+
+async def getServiceBookingStatistics(start_date: Optional[date] = None, end_date: Optional[date] = None) -> List[
+    Tuple[str, int]]:
+    """
+    Возвращает статистику записей по услугам за указанный период.
+    Возвращает список кортежей (название_услуги, количество_записей).
+    """
+    if _async_session_factory is None:
+        raise RuntimeError("Фабрика сессий базы данных не инициализирована.")
+    async with _async_session_factory() as session:
+        stmt = select(Service.name, func.count(Booking.id)). \
+            join(Booking, Service.id == Booking.service_id)
+
+        if start_date:
+            stmt = stmt.where(Booking.booking_date >= start_date)
+        if end_date:
+            stmt = stmt.where(Booking.booking_date <= (end_date + timedelta(days=1)))
+
+        stmt = stmt.group_by(Service.name).order_by(func.count(Booking.id).desc())
+
+        result = await session.execute(stmt)
+        return result.all()
+
+
+async def getMasterBookingStatistics(start_date: Optional[date] = None, end_date: Optional[date] = None) -> List[
+    Tuple[str, int]]:
+    """
+    Возвращает статистику записей по мастерам за указанный период.
+    Возвращает список кортежей (имя_мастера, количество_записей).
+    """
+    if _async_session_factory is None:
+        raise RuntimeError("Фабрика сессий базы данных не инициализирована.")
+    async with _async_session_factory() as session:
+        stmt = select(Barber.name, func.count(Booking.id)). \
+            join(Booking, Barber.id == Booking.barber_id)
+
+        if start_date:
+            stmt = stmt.where(Booking.booking_date >= start_date)
+        if end_date:
+            stmt = stmt.where(Booking.booking_date <= (end_date + timedelta(days=1)))
+
+        stmt = stmt.group_by(Barber.name).order_by(func.count(Booking.id).desc())
+
+        result = await session.execute(stmt)
+        return result.all()
+
+async def getBookingsForDate(target_date: date) -> List[Booking]:
+    """
+    Получает все активные записи на конкретную дату, жадно загружая связанные услуги и мастеров.
+    """
+    if _async_session_factory is None:
+        raise RuntimeError("Фабрика сессий базы данных не инициализирована.")
+    async with _async_session_factory() as session:
+        # Для поиска записей на конкретный день, сравниваем только дату
+        # booking_date - это DateTime, поэтому нужно сравнить только компонент даты
+        stmt = select(Booking).where(
+            func.date(Booking.booking_date) == target_date,
+            Booking.status == "active"
+        ).options(
+            joinedload(Booking.service), # Жадно загружаем связанную услугу
+            joinedload(Booking.barber)   # Жадно загружаем связанного мастера
+        ).order_by(Booking.booking_date) # Сортируем по времени записи
+
+        result = await session.execute(stmt)
+        return result.scalars().all()
