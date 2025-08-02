@@ -1,4 +1,3 @@
-# app/handlers/user/handler_my_bookings.py
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from datetime import datetime

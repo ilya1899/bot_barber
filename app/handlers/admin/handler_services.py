@@ -97,8 +97,10 @@ async def handlerAdminBackToAdminMenu(callback: CallbackQuery, state: FSMContext
         return
 
     await state.clear()
-    await callback.message.answer("Добро пожаловать в админ-панель!", reply_markup=admin_menu_keyboard)
+    await callback.message.edit_text("Добро пожаловать в админ-панель!")
+    await callback.message.answer("Выберите действие:", reply_markup=admin_menu_keyboard())  # вызываем функцию, чтобы получить клавиатуру
     await callback.answer()
+
 
 
 # --- Добавление услуги: Шаг 1 (Название) ---
@@ -255,18 +257,24 @@ async def handlerAdminCancelAddService(callback: CallbackQuery, state: FSMContex
     await callback.message.answer("Выберите действие с услугами:", reply_markup=admin_services_menu_keyboard())
     await callback.answer()
 
+ADMIN_SERVICES_PER_PAGE = 5
 
-# --- Просмотр услуг ---
+## --- Просмотр услуг ---
 @admin_router.callback_query(F.data == "adminViewServices")
 async def handlerAdminViewServicesList(callback: CallbackQuery, state: FSMContext):
     """
     Отображает список всех услуг с пагинацией для просмотра.
     """
+    # Проверка прав администратора
     if not await db_requests.isUserAdmin(callback.from_user.id):
         await callback.answer("У вас нет прав для выполнения этого действия.", show_alert=True)
         return
 
-    await state.clear()
+    await state.clear() # Очищаем состояние FSM
+
+    # Получаем все услуги (предполагается, что getServices() достает их все)
+    # Если getServices() требует сессию, то вам нужно добавить async with _async_session_factory() as session:
+    # и передавать session в getServices(session)
     services = await db_requests.getServices()
 
     if not services:
@@ -275,10 +283,10 @@ async def handlerAdminViewServicesList(callback: CallbackQuery, state: FSMContex
         await callback.answer()
         return
 
+    # Отправляем сообщение со списком услуг на первой странице
     await callback.message.edit_text(
-        "Список услуг:\n\n"
         "Выберите услугу для просмотра деталей:",
-        reply_markup=admin_services_list_action_keyboard(services, "adminViewService", 0, BOOKINGS_PER_PAGE)
+        reply_markup=admin_services_list_action_keyboard(services, "adminViewService", 0, ADMIN_SERVICES_PER_PAGE)
     )
     await callback.answer()
 
@@ -288,19 +296,38 @@ async def handlerAdminViewServicesPaginate(callback: CallbackQuery):
     """
     Обрабатывает пагинацию списка услуг для просмотра.
     """
+    # Проверка прав администратора
     if not await db_requests.isUserAdmin(callback.from_user.id):
         await callback.answer("У вас нет прав для выполнения этого действия.", show_alert=True)
         return
 
+    # Получаем все услуги (предполагается, что getServices() достает их все)
     services = await db_requests.getServices()
 
-    page = int(callback.data.split("_")[1])
+    page = int(callback.data.split("_")[1]) # Получаем номер страницы из callback_data
 
-    await callback.message.edit_reply_markup(
-        reply_markup=admin_services_list_action_keyboard(services, "adminViewService", page, BOOKINGS_PER_PAGE)
+    # Обновляем сообщение с новой страницей услуг, сохраняя текст
+    await callback.message.edit_text(
+        "Список услуг:\n\n"
+        "Выберите услугу для просмотра деталей:",
+        reply_markup=admin_services_list_action_keyboard(services, "adminViewService", page, ADMIN_SERVICES_PER_PAGE)
     )
     await callback.answer()
 
+# Новый хэндлер для кнопки "Назад в меню услуг"
+@admin_router.callback_query(F.data == "admin_back_to_services_menu")
+async def handlerAdminBackToServicesMenu(callback: CallbackQuery):
+    """
+    Обрабатывает возврат из просмотра услуг в меню управления услугами.
+    """
+    if not await db_requests.isUserAdmin(callback.from_user.id):
+        await callback.answer("У вас нет прав для выполнения этого действия.", show_alert=True)
+        return
+    await callback.message.edit_text(
+        "Выберите действие с услугами:",
+        reply_markup=admin_services_menu_keyboard() # Возвращаем клавиатуру меню услуг
+    )
+    await callback.answer()
 
 @admin_router.callback_query(F.data.startswith("adminViewService_"))
 async def handlerAdminViewSingleService(callback: CallbackQuery, state: FSMContext):

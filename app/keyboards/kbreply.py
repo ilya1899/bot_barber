@@ -12,12 +12,12 @@ request_contact_keyboard = ReplyKeyboardMarkup(
 # Главное меню
 main_menu_keyboard = ReplyKeyboardMarkup(
     keyboard=[
-        [KeyboardButton(text="💈 Записаться")],
-        [KeyboardButton(text="🗓 Мои записи"), KeyboardButton(text="ℹ️ Подробнее об услугах")],
-        [KeyboardButton(text="📞 Поддержка")]
+        [KeyboardButton(text="💈 Записаться"), KeyboardButton(text="🗓 Мои записи")],
+        [KeyboardButton(text="ℹ️ Подробнее об услугах"), KeyboardButton(text="📞 Поддержка")]
     ],
     resize_keyboard=True,
-    input_field_placeholder="Выберите действие из меню"
+    input_field_placeholder="Выберите действие из меню",
+    one_time_keyboard=True
 )
 
 admin_menu_keyboard = ReplyKeyboardMarkup(

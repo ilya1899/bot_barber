@@ -279,7 +279,7 @@ async def displayStatistics(message: Message, state: FSMContext):
                 stat_text += f"""  - {service_name}: <b>{count}</b>
 """
         else:
-            stat_text += """  Нет записей по услугам за выбранный период.
+            stat_text += """Нет записей по услугам за выбранный период.
 """
     elif category == "masters":
         master_stats = await db_requests.getMasterBookingStatistics(start_date, end_date)
@@ -290,7 +290,7 @@ async def displayStatistics(message: Message, state: FSMContext):
                 stat_text += f"""  - {master_name}: <b>{count}</b>
 """
         else:
-            stat_text += """  Нет записей к мастерам за выбранный период.
+            stat_text += """Нет записей к мастерам за выбранный период.
 """
     else:
         stat_text = """Неизвестная категория статистики."""

@@ -5,7 +5,7 @@ import calendar
 from typing import List, Tuple, Optional  # ИСПРАВЛЕНО: Добавлен Optional
 
 from app.database.models import Service, Booking, Barber  # Убедитесь, что импортированы модели
-from config import BOOKINGS_PER_PAGE
+from config import BOOKINGS_PER_PAGE, AVAILABLE_TIME_SLOTS
 
 
 def services_keyboard(services: List[Service]) -> InlineKeyboardMarkup:
@@ -18,94 +18,66 @@ def services_keyboard(services: List[Service]) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def calendar_keyboard(current_date: date = None) -> InlineKeyboardMarkup:
-    """Создает Inline-клавиатуру календаря для выбора даты (для пользователя).
-    Показывает только сегодняшние и будущие даты.
+def time_slots_keyboard(chosen_date_str: str, service_id: int):
     """
-    if current_date is None:
-        current_date = date.today()
-
+    Создает клавиатуру с доступными временными слотами.
+    :param chosen_date_str: Выбранная дата в строковом формате 'YYYY-MM-DD'.
+    :param service_id: ID выбранной услуги.
+    :return: InlineKeyboardMarkup
+    """
     builder = InlineKeyboardBuilder()
-    today = date.today()
 
-    # Навигация по году и месяцу
-    month_name = current_date.strftime('%B').capitalize()  # Форматируем название месяца
+    # Список доступных временных слотов
+    # Здесь можно добавить логику, чтобы получать слоты динамически
+    # Например, из базы данных с учетом занятости мастеров
 
-    builder.row(
-        InlineKeyboardButton(text=f"« {current_date.year - 1}", callback_data=f"navigateYear_{current_date.year - 1}"),
-        InlineKeyboardButton(text=f"{current_date.year}", callback_data="ignore"),
-        InlineKeyboardButton(text=f"{current_date.year + 1} »", callback_data=f"navigateYear_{current_date.year + 1}"),
-        width=3  # ИСПРАВЛЕНО: Указываем ширину
-    )
-    builder.row(
-        InlineKeyboardButton(text="«",
-                             callback_data=f"navigateMonth_{(current_date.replace(day=1) - timedelta(days=1)):%Y-%m}"),
-        # ИСПРАВЛЕНО: Короткий текст
-        InlineKeyboardButton(text=f"{month_name} {current_date.year}", callback_data="ignore"),
-        # ИСПРАВЛЕНО: Месяц и год
-        InlineKeyboardButton(text="»",
-                             callback_data=f"navigateMonth_{(current_date.replace(day=28) + timedelta(days=4)):%Y-%m}"),
-        # ИСПРАВЛЕНО: Короткий текст
-        width=3  # ИСПРАВЛЕНО: Указываем ширину
-    )
+    # Генерация кнопок времени
+    for time_slot in AVAILABLE_TIME_SLOTS:
+        # ИСПРАВЛЕНО: Формируем callback_data в правильном формате
+        callback_data = f"chooseTime_{time_slot}_{chosen_date_str}_{service_id}"
+        builder.add(InlineKeyboardButton(text=time_slot, callback_data=callback_data))
 
-    # Дни недели
-    weekdays = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
-    builder.row(*[InlineKeyboardButton(text=day, callback_data="ignore") for day in weekdays],
-                width=7)  # ИСПРАВЛЕНО: Указываем ширину
-
-    # Дни месяца
-    first_day_of_month = current_date.replace(day=1)
-    start_day_of_week = first_day_of_month.weekday()
-
-    # Добавляем пустые кнопки для начала недели, если месяц начинается не с понедельника
-    for _ in range(start_day_of_week):
-        builder.add(InlineKeyboardButton(text=" ", callback_data="ignore"))
-
-    num_days_in_month = (current_date.replace(month=current_date.month % 12 + 1, day=1) - timedelta(days=1)).day
-
-    for day_num in range(1, num_days_in_month + 1):
-        day = current_date.replace(day=day_num)
-        callback_data = f"chooseDate_{day:%Y-%m-%d}"
-        button_text = str(day_num)
-
-        # Отключаем кнопки для прошедших дат
-        if day < today:
-            builder.add(InlineKeyboardButton(text=" ", callback_data="ignore"))  # Неактивная кнопка
-        else:
-            if day == today:
-                button_text = f"[{day_num}]"  # Обозначаем сегодняшний день
-            builder.add(InlineKeyboardButton(text=button_text, callback_data=callback_data))
-
-    builder.adjust(7)  # Выравниваем дни по 7 столбцам
-
-    # Нижние кнопки
-    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="backToServices"))
-    builder.row(InlineKeyboardButton(text="❌ Отменить заполнение", callback_data="cancelForm"))
-
-    return builder.as_markup()
-
-
-def time_slots_keyboard(available_times: list[str]) -> InlineKeyboardMarkup:
-    """Создает Inline-клавиатуру с доступными временными слотами."""
-    builder = InlineKeyboardBuilder()
-    for time_slot in available_times:
-        builder.add(InlineKeyboardButton(text=time_slot, callback_data=f"chooseTime_{time_slot}"))
     builder.adjust(4)
-    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="backToDateSelection"))
-    builder.row(InlineKeyboardButton(text="❌ Отменить заполнение", callback_data="cancelForm"))
+
+    # Добавление кнопок "Назад" и "Отмена"
+    builder.row(
+        InlineKeyboardButton(text="◀️ Назад", callback_data=f"backToCalendar_{service_id}"),
+        InlineKeyboardButton(text="❌ Отменить", callback_data="cancelForm")
+    )
+
     return builder.as_markup()
 
 
-def barbers_keyboard(barbers: List[Barber]) -> InlineKeyboardMarkup:
-    """Создает Inline-клавиатуру со списком мастеров."""
+def barbers_keyboard(barbers: list, chosen_date_str: str, chosen_time_str: str, service_id: int):
+    """
+    Создает клавиатуру с доступными мастерами.
+    :param barbers: Список объектов Barber.
+    :param chosen_date_str: Выбранная дата в формате 'YYYY-MM-DD'.
+    :param chosen_time_str: Выбранное время в формате 'HH:MM'.
+    :param service_id: ID выбранной услуги.
+    :return: InlineKeyboardMarkup
+    """
     builder = InlineKeyboardBuilder()
+
     for barber in barbers:
-        builder.add(InlineKeyboardButton(text=barber.name, callback_data=f"chooseBarber_{barber.id}"))
-    builder.add(InlineKeyboardButton(text="Любой мастер", callback_data="chooseBarber_any"))
+        # ИСПРАВЛЕНО: Формируем callback_data в правильном формате
+        callback_data = f"chooseBarber_{barber.id}_{chosen_date_str}_{chosen_time_str}_{service_id}"
+        builder.add(InlineKeyboardButton(text=barber.name, callback_data=callback_data))
+
+    # Добавляем кнопку "Любой мастер"
+    builder.add(InlineKeyboardButton(
+        text="Любой мастер",
+        callback_data=f"chooseBarber_any_{chosen_date_str}_{chosen_time_str}_{service_id}"
+    ))
+
     builder.adjust(2)
-    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="backToTimeSelection"))
-    builder.row(InlineKeyboardButton(text="❌ Отменить заполнение", callback_data="cancelForm"))
+
+    # Добавляем кнопку "Назад"
+    builder.row(
+        InlineKeyboardButton(text="◀️ Назад", callback_data=f"backToTime_{chosen_date_str}_{service_id}"),
+        InlineKeyboardButton(text="❌ Отменить", callback_data="cancelForm")
+    )
+
     return builder.as_markup()
 
 
@@ -129,26 +101,6 @@ def final_booking_card_keyboard() -> InlineKeyboardMarkup:
     builder.add(InlineKeyboardButton(text="🗑️ Удалить", callback_data="deleteBooking"))
     builder.adjust(2)
     return builder.as_markup()
-
-
-def get_final_booking_card_content(service_name: str, chosen_date: date, chosen_time: str, barber_name: str) -> Tuple[
-    str, InlineKeyboardMarkup]:
-    """Формирует текст и клавиатуру для итоговой карточки записи."""
-    final_card_text = (
-        f"<b>Итоговая карточка записи:</b>\n\n"
-        f"Услуга: <b>{service_name}</b>\n"
-        f"Дата: <b>{chosen_date.strftime('%d.%m.%Y')}</b>\n"
-        f"Время: <b>{chosen_time}</b>\n"
-        f"Мастер: <b>{barber_name}</b>\n\n"
-        f"Проверьте, все ли верно?"
-    )
-
-    builder = InlineKeyboardBuilder()
-    builder.add(InlineKeyboardButton(text="✅ Записаться", callback_data="confirmBooking"))
-    builder.add(InlineKeyboardButton(text="🗑️ Удалить", callback_data="deleteBooking"))
-    builder.adjust(2)
-
-    return final_card_text, builder.as_markup()
 
 
 def create_bookings_list_keyboard(bookings: List[Booking], page: int = 0) -> InlineKeyboardMarkup:
@@ -284,43 +236,57 @@ def admin_add_service_confirm_keyboard() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def admin_services_list_action_keyboard(services: List[Service], action_prefix: str, current_page: int = 0,
-                                        services_per_page: int = BOOKINGS_PER_PAGE) -> InlineKeyboardMarkup:
+def admin_services_list_action_keyboard(
+        services: List,  # Тип должен быть List[Service], если используете модели
+        base_callback_data: str,
+        current_page: int,
+        items_per_page: int
+) -> InlineKeyboardMarkup:
     """
-    Создает Inline-клавиатуру со списком услуг для различных админ-действий (просмотр, удаление).
-    `action_prefix` определяет, какое действие будет выполняться при выборе услуги.
+    Генерирует Inline-клавиатуру для списка услуг в админ-панели с пагинацией.
+    :param services: Список объектов услуг.
+    :param base_callback_data: Базовый префикс для callback_data кнопок услуг (например, "adminViewService").
+    :param current_page: Текущая страница (начиная с 0).
+    :param items_per_page: Количество услуг на одной странице.
     """
-    builder = InlineKeyboardBuilder()
+    keyboard = []
 
-    start_index = current_page * services_per_page
-    end_index = start_index + services_per_page
+    total_services = len(services)
+    total_pages = (total_services + items_per_page - 1) // items_per_page  # Правильный расчет общего количества страниц
+
+    start_index = current_page * items_per_page
+    end_index = start_index + items_per_page
 
     services_on_page = services[start_index:end_index]
 
+    # Создаем кнопки для каждой услуги на текущей странице
     for service in services_on_page:
-        builder.button(text=service.name, callback_data=f"{action_prefix}_{service.id}")
+        # Callback data для просмотра деталей услуги будет выглядеть так: "adminViewService_123"
+        keyboard.append([InlineKeyboardButton(text=service.name, callback_data=f"{base_callback_data}_{service.id}")])
 
-    total_pages = (len(services) + services_per_page - 1) // services_per_page
-    nav_buttons = []
+    # Добавляем кнопки для навигации (Назад/Вперед) и индикатор страницы
+    pagination_row = []
     if current_page > 0:
-        nav_buttons.append(InlineKeyboardButton(text="◀️", callback_data=f"{action_prefix}Page_{current_page - 1}"))
-    else:
-        nav_buttons.append(InlineKeyboardButton(text=" ", callback_data="ignore"))
+        # Callback data для перехода на предыдущую страницу: "adminViewServicePage_0"
+        pagination_row.append(
+            InlineKeyboardButton(text="⬅️ Назад", callback_data=f"adminViewServicePage_{current_page - 1}"))
 
-    nav_buttons.append(InlineKeyboardButton(text=f"{current_page + 1}/{total_pages}", callback_data="ignore"))
+    # Индикатор текущей страницы / общего количества страниц
+    pagination_row.append(
+        InlineKeyboardButton(text=f"{current_page + 1}/{total_pages}", callback_data="page_indicator"))
 
     if current_page < total_pages - 1:
-        nav_buttons.append(InlineKeyboardButton(text="▶️", callback_data=f"{action_prefix}Page_{current_page + 1}"))
-    else:
-        nav_buttons.append(InlineKeyboardButton(text=" ", callback_data="ignore"))
+        # Callback data для перехода на следующую страницу: "adminViewServicePage_2"
+        pagination_row.append(
+            InlineKeyboardButton(text="➡️ Вперед", callback_data=f"adminViewServicePage_{current_page + 1}"))
 
-    builder.row(*nav_buttons)
+    if pagination_row:  # Добавляем ряд с пагинацией, только если в нем есть кнопки
+        keyboard.append(pagination_row)
 
-    builder.row(
-        InlineKeyboardButton(text="🔙 Назад", callback_data="adminBackToServiceMenu")
-    )
+    # Кнопка для возврата в главное меню услуг
+    keyboard.append([InlineKeyboardButton(text="↩️ Назад в меню услуг", callback_data="admin_back_to_services_menu")])
 
-    return builder.as_markup()
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
 def admin_single_service_view_keyboard(service_id: int) -> InlineKeyboardMarkup:
@@ -361,45 +327,61 @@ def adminAddMasterConfirmKeyboard() -> InlineKeyboardMarkup:
     builder.adjust(2)
     return builder.as_markup()
 
+MASTERS_PER_PAGE = 5
 
-def adminMastersListActionKeyboard(barbers: List[Barber], action_prefix: str, currentPage: int = 0,
-                                   itemsPerPage: int = BOOKINGS_PER_PAGE) -> InlineKeyboardMarkup:
+
+def getMasterSelectKeyboard(barbers: list, callback_prefix: str, page: int) -> InlineKeyboardMarkup:
     """
-    Creates an inline keyboard with a paginated list of barbers for various admin actions.
-    `action_prefix` determines the action when a barber is selected (e.g., "adminViewMaster", "adminSelectDeleteMaster").
+    Создает инлайн-клавиатуру с пагинацией для списка мастеров.
+
+    :param barbers: Список всех мастеров.
+    :param callback_prefix: Префикс для callback_data (например, 'adminSelectDeleteMaster').
+    :param page: Текущая страница (начиная с 0).
+    :return: Объект InlineKeyboardMarkup.
     """
-    builder = InlineKeyboardBuilder()
+    keyboard_buttons = []
 
-    startIndex = currentPage * itemsPerPage
-    endIndex = startIndex + itemsPerPage
+    total_pages = (len(barbers) + MASTERS_PER_PAGE - 1) // MASTERS_PER_PAGE
+    start_index = page * MASTERS_PER_PAGE
+    end_index = start_index + MASTERS_PER_PAGE
 
-    barbersOnPage = barbers[startIndex:endIndex]
+    # Добавляем кнопки для мастеров на текущей странице
+    for i in range(start_index, min(end_index, len(barbers))):
+        barber = barbers[i]
+        keyboard_buttons.append([
+            InlineKeyboardButton(text=barber.name, callback_data=f"{callback_prefix}_{barber.id}")
+        ])
 
-    for barber in barbersOnPage:
-        builder.button(text=barber.name, callback_data=f"{action_prefix}_{barber.id}")
+    # Добавляем кнопки пагинации (стрелки и номер страницы)
+    pagination_buttons = []
+    if page > 0:
+        pagination_buttons.append(InlineKeyboardButton(text="◀️", callback_data=f"{callback_prefix}Page_{page - 1}"))
 
-    totalPages = (len(barbers) + itemsPerPage - 1) // itemsPerPage
-    navButtons = []
-    if currentPage > 0:
-        navButtons.append(InlineKeyboardButton(text="◀️", callback_data=f"{action_prefix}Page_{currentPage - 1}"))
-    else:
-        navButtons.append(InlineKeyboardButton(text=" ", callback_data="ignore"))
+    pagination_buttons.append(
+        InlineKeyboardButton(text=f"{page + 1}/{total_pages}", callback_data="pagination_current_page"))
 
-    navButtons.append(InlineKeyboardButton(text=f"{currentPage + 1}/{totalPages}", callback_data="ignore"))
+    if page < total_pages - 1:
+        pagination_buttons.append(InlineKeyboardButton(text="▶️", callback_data=f"{callback_prefix}Page_{page + 1}"))
 
-    if currentPage < totalPages - 1:
-        navButtons.append(InlineKeyboardButton(text="▶️", callback_data=f"{action_prefix}Page_{currentPage + 1}"))
-    else:
-        navButtons.append(InlineKeyboardButton(text=" ", callback_data="ignore"))
+    if pagination_buttons:
+        keyboard_buttons.append(pagination_buttons)
 
-    builder.row(*navButtons)
+    # Кнопка "Назад"
+    keyboard_buttons.append([
+        InlineKeyboardButton(text="⬅️ Назад", callback_data="adminMastersBack")
+    ])
 
-    builder.row(
-        InlineKeyboardButton(text="🔙 Назад", callback_data="adminBackToMastersMenu")  # Back to masters menu
-    )
+    return InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
 
-    return builder.as_markup()
 
+def adminConfirmDeleteMasterKeyboard(master_id: int) -> InlineKeyboardMarkup:
+    """
+    Создает клавиатуру для подтверждения удаления мастера.
+    """
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="❌ Да, удалить", callback_data=f"adminExecuteDeleteMaster_{master_id}")],
+        [InlineKeyboardButton(text="⬅️ Отмена", callback_data="cancelDeleteMaster")]
+    ])
 
 def adminSingleMasterViewKeyboard(masterId: int) -> InlineKeyboardMarkup:
     """Creates an inline keyboard for viewing details of a single master in the admin panel."""
@@ -437,10 +419,15 @@ def adminMasterServicesSelectionKeyboard(services: List[Service],
     return builder.as_markup()
 
 
+MONTHS_RU = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь",
+             "Декабрь"]
+
+
 def adminMasterVacationCalendarKeyboard(currentDate: date = None, minDate: date = None) -> InlineKeyboardMarkup:
     """
-    Creates an inline calendar keyboard for selecting vacation dates for a master.
-    `minDate` can be used to prevent selecting dates before a certain point (e.g., start date).
+    Создает инлайн-клавиатуру календаря для выбора дат отпуска для мастера.
+    Показывает только текущие и будущие даты.
+    `minDate` может быть использована для предотвращения выбора дат до определенного момента.
     """
     if currentDate is None:
         currentDate = date.today()
@@ -449,7 +436,7 @@ def adminMasterVacationCalendarKeyboard(currentDate: date = None, minDate: date 
 
     builder = InlineKeyboardBuilder()
 
-    # Navigation buttons for year
+    # Ряд 1: Кнопки навигации по году
     builder.row(
         InlineKeyboardButton(text=f"« {currentDate.year - 1}",
                              callback_data=f"adminVacationNavigateYear_{currentDate.year - 1}"),
@@ -457,39 +444,44 @@ def adminMasterVacationCalendarKeyboard(currentDate: date = None, minDate: date 
         InlineKeyboardButton(text=f"{currentDate.year + 1} »",
                              callback_data=f"adminVacationNavigateYear_{currentDate.year + 1}")
     )
-    # Navigation buttons for month
+
+    # Ряд 2: Кнопки навигации по месяцу
     builder.row(
-        InlineKeyboardButton(text="« Предыдущий",
-                             callback_data=f"adminVacationNavigateMonth_{currentDate.replace(day=1) - timedelta(days=1):%Y-%m}"),
-        InlineKeyboardButton(text=f"{currentDate.strftime('%B')}", callback_data="ignore"),
-        InlineKeyboardButton(text="Следующий »",
-                             callback_data=f"adminVacationNavigateMonth_{currentDate.replace(day=28) + timedelta(days=4):%Y-%m}")
+        InlineKeyboardButton(text="«",
+                             callback_data=f"adminVacationNavigateMonth_{(currentDate.replace(day=1) - timedelta(days=1)):%Y-%m}"),
+        InlineKeyboardButton(text=f"{MONTHS_RU[currentDate.month - 1]}", callback_data="ignore"),
+        InlineKeyboardButton(text="»",
+                             callback_data=f"adminVacationNavigateMonth_{(currentDate.replace(day=28) + timedelta(days=4)):%Y-%m}")
     )
 
-    # Weekday headers
-    weekdays = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
-    builder.row(*[InlineKeyboardButton(text=day, callback_data="ignore") for day in weekdays])
+    # Ряд 3: Заголовки дней недели
+    builder.row(*[InlineKeyboardButton(text=day, callback_data="ignore") for day in WEEKDAYS_RU])
 
-    # Days of the month
+    # Дни месяца
     firstDayOfMonth = currentDate.replace(day=1)
     startDayOfWeek = firstDayOfMonth.weekday()
 
+    # Добавляем пустые кнопки для начала недели
     for _ in range(startDayOfWeek):
         builder.add(InlineKeyboardButton(text=" ", callback_data="ignore"))
 
     numDaysInMonth = (currentDate.replace(month=currentDate.month % 12 + 1, day=1) - timedelta(days=1)).day
     for dayNum in range(1, numDaysInMonth + 1):
         day = currentDate.replace(day=dayNum)
-        # Disable past dates or dates before minDate
+
+        # Отключаем прошедшие даты
         if day < minDate:
-            builder.add(InlineKeyboardButton(text=str(dayNum), callback_data="ignore"))
+            builder.add(InlineKeyboardButton(text=" ", callback_data="ignore"))
         else:
             callback_data = f"adminVacationDate_{day:%Y-%m-%d}"
             builder.add(InlineKeyboardButton(text=str(dayNum), callback_data=callback_data))
 
-    builder.adjust(7)
+    # Выравниваем кнопки дней по 7 столбцам
+    builder.adjust(3, 3, 7, *([7] * 6), 1)
 
-    builder.row(InlineKeyboardButton(text="❌ Отменить", callback_data="adminCancelOperation"))  # Generic cancel
+    # Последний ряд: Кнопка Отмены
+    builder.row(InlineKeyboardButton(text="❌ Отменить", callback_data="adminCancelOperation"))
+
     return builder.as_markup()
 
 
@@ -707,3 +699,157 @@ def adminDayBookingsKeyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(InlineKeyboardButton(text="🔙 Назад к календарю", callback_data="adminBackToCalendarSelection"))
     return builder.as_markup()
+
+
+# Названия месяцев и дней недели на русском языке
+WEEKDAYS_RU = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
+
+
+def calendar_keyboard(current_date: date = None, service_id: int = None) -> InlineKeyboardMarkup:
+    """
+    Генерирует инлайн-клавиатуру с календарем на заданный месяц и год.
+
+    Args:
+        current_date (date): Текущая дата для отображения календаря. Если None, используется date.today().
+        service_id (int): ID выбранной услуги для передачи в callback_data.
+    Returns:
+        InlineKeyboardMarkup: Объект клавиатуры.
+    """
+    if current_date is None:
+        current_date = date.today()
+
+    year = current_date.year
+    month = current_date.month
+
+    builder = InlineKeyboardBuilder()
+
+    today = date.today()
+
+    # Заголовки: Год и Месяц
+    builder.row(
+        InlineKeyboardButton(text=f"<< {year - 1}", callback_data=f"navigateYear_{year - 1}_{month}_{service_id}"),
+        InlineKeyboardButton(text=f"{MONTHS_RU[month - 1]} {year}", callback_data="ignore"),
+        InlineKeyboardButton(text=f"{year + 1} >>", callback_data=f"navigateYear_{year + 1}_{month}_{service_id}")
+    )
+
+    # Дни недели (Пн, Вт, Ср, ...) - некликабельные заголовки
+    weekday_buttons = [InlineKeyboardButton(text=day, callback_data="ignore") for day in WEEKDAYS_RU]
+    builder.row(*weekday_buttons)
+
+    # Дни месяца
+    cal = calendar.Calendar(firstweekday=calendar.MONDAY)
+    for week in cal.monthdayscalendar(year, month):
+        day_buttons = []
+        for day in week:
+            if day == 0:
+                # Пустая кнопка для дней вне текущего месяца
+                day_buttons.append(InlineKeyboardButton(text=" ", callback_data="ignore"))
+            else:
+                day_date = date(year, month, day)
+                # Блокируем даты, которые уже прошли
+                if day_date < today:
+                    day_buttons.append(InlineKeyboardButton(text=f"~{day}~", callback_data="ignore"))
+                else:
+                    # В callback_data добавляем service_id
+                    day_buttons.append(InlineKeyboardButton(text=str(day),
+                                                            callback_data=f"chooseDate_{day_date.strftime('%Y-%m-%d')}_{service_id}"))
+        builder.row(*day_buttons)
+
+    # Кнопки для переключения месяцев
+    prev_month_date = date(year, month, 1) - timedelta(days=1)
+    next_month_date = date(year, month, 28) + timedelta(days=4)
+
+    prev_month_btn = InlineKeyboardButton(
+        text="< Назад",
+        # В callback_data добавляем service_id
+        callback_data=f"navigateMonth_{prev_month_date.strftime('%Y-%m')}_{service_id}"
+    )
+    next_month_btn = InlineKeyboardButton(
+        text="Вперед >",
+        # В callback_data добавляем service_id
+        callback_data=f"navigateMonth_{next_month_date.strftime('%Y-%m')}_{service_id}"
+    )
+
+    # Кнопка "Назад", которая выведет из календаря в главное меню
+    main_back_button = InlineKeyboardButton(
+        text="🔙 Выход из календаря",
+        callback_data="backToMainMenu"
+    )
+
+    # Формируем последнюю строку с навигацией по месяцам и кнопку "Назад"
+    builder.row(prev_month_btn, next_month_btn)
+    builder.row(main_back_button)
+
+    return builder.as_markup()
+
+
+def single_service_details_keyboard_with_nav(
+        service_id: int,
+        prev_service_id: int = None,
+        next_service_id: int = None
+) -> InlineKeyboardMarkup:
+    """
+    Создает клавиатуру для просмотра одной услуги с кнопками навигации.
+
+    Args:
+        service_id (int): ID текущей услуги.
+        prev_service_id (int): ID предыдущей услуги. Если None, кнопка не отображается.
+        next_service_id (int): ID следующей услуги. Если None, кнопка не отображается.
+
+    Returns:
+        InlineKeyboardMarkup: Объект клавиатуры.
+    """
+    builder = InlineKeyboardBuilder()
+
+    # Кнопки навигации между услугами
+    if prev_service_id is not None:
+        builder.button(text="<", callback_data=f"showService_{prev_service_id}")
+
+    # Кнопка для записи на текущую услугу
+    builder.button(text="✍️ Записаться", callback_data=f"bookService_{service_id}")
+
+    if next_service_id is not None:
+        builder.button(text=">", callback_data=f"showService_{next_service_id}")
+
+    builder.adjust(3)
+
+    # Дополнительные кнопки
+    builder.row(InlineKeyboardButton(text="❌ Отменить заполнение", callback_data="cancelForm"))
+
+    return builder.as_markup()
+
+
+def get_final_booking_card_content(
+        service_name: str,
+        chosen_date: datetime.date,
+        chosen_time: str,
+        barber_name: str,
+        service_id: int,
+        barber_id: int | None
+) -> Tuple[str, InlineKeyboardMarkup]:
+    """
+    Создает текст и inline-клавиатуру для карточки подтверждения записи.
+    """
+    card_text = (
+        f"📋 **Подтверждение записи**\n"
+        f"➖➖➖➖➖➖➖➖➖➖\n"
+        f"**Услуга:** {service_name}\n"
+        f"**Дата:** {chosen_date.strftime('%d.%m.%Y')}\n"
+        f"**Время:** {chosen_time}\n"
+        f"**Мастер:** {barber_name}\n"
+        f"➖➖➖➖➖➖➖➖➖➖\n"
+        f"Пожалуйста, проверьте данные и подтвердите запись."
+    )
+
+    # Формируем уникальную callback_data для кнопки подтверждения
+    callback_data = f"confirmBooking_{service_id}_{chosen_date.strftime('%Y-%m-%d')}_{chosen_time}_{barber_id}"
+
+    confirm_button = InlineKeyboardButton(text="✅ Подтвердить", callback_data=callback_data)
+    cancel_button = InlineKeyboardButton(text="❌ Отменить", callback_data="cancelBooking")
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [confirm_button],
+        [cancel_button]
+    ])
+
+    return card_text, keyboard

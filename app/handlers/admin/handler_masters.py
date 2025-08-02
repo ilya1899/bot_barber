@@ -9,7 +9,7 @@ from typing import List, Tuple, Optional
 from app.keyboards.kbreply import admin_menu_keyboard
 from app.keyboards.kbinline import (
     adminMastersMenuKeyboard, adminAddMasterConfirmKeyboard,
-    adminMastersListActionKeyboard, adminSingleMasterViewKeyboard,
+    getMasterSelectKeyboard, adminSingleMasterViewKeyboard,
     adminConfirmDeleteMasterKeyboard, adminMasterServicesSelectionKeyboard,
     adminMasterVacationCalendarKeyboard, adminMasterVacationConfirmKeyboard
 )
@@ -359,16 +359,18 @@ async def handlerAdminCancelAddMaster(callback: CallbackQuery, state: FSMContext
 
 
 # --- Просмотр мастеров ---
-@admin_masters_router.callback_query(F.data == "adminViewMasters")
-async def handlerAdminViewMastersList(callback: CallbackQuery, state: FSMContext):
+@admin_masters_router.callback_query(
+    F.data == "adminViewBarbers")  # Убедитесь, что это правильный callback для вызова списка
+async def handlerAdminViewBarbersList(callback: CallbackQuery, state: FSMContext):
     """
-    Отображает постраничный список всех мастеров для просмотра.
+    Отображает список всех мастеров с пагинацией для просмотра.
     """
     if not await db_requests.isUserAdmin(callback.from_user.id):
         await callback.answer("У вас нет прав для выполнения этого действия.", show_alert=True)
         return
 
-    await state.clear()  # Очищаем любое предыдущее состояние
+    await state.clear()
+
     barbers = await db_requests.getBarbers()
 
     if not barbers:
@@ -378,28 +380,80 @@ async def handlerAdminViewMastersList(callback: CallbackQuery, state: FSMContext
         return
 
     await callback.message.edit_text(
-        """Список мастеров:
-
-Выберите мастера для просмотра деталей:""",
-        reply_markup=adminMastersListActionKeyboard(barbers, "adminViewMaster", 0, BOOKINGS_PER_PAGE)
+        "Выберите мастера для просмотра деталей:",
+        reply_markup=getMasterSelectKeyboard(barbers, "adminViewBarber", 0, BOOKINGS_PER_PAGE)
     )
     await callback.answer()
 
 
-@admin_masters_router.callback_query(F.data.startswith("adminViewMasterPage_"))
-async def handlerAdminViewMastersPaginate(callback: CallbackQuery):
+@admin_masters_router.callback_query(F.data.startswith("adminViewBarberPage_"))
+async def handlerAdminViewBarbersPaginate(callback: CallbackQuery):
     """
-    Обрабатывает пагинацию списка мастеров в режиме просмотра.
+    Обрабатывает пагинацию списка мастеров для просмотра.
     """
     if not await db_requests.isUserAdmin(callback.from_user.id):
         await callback.answer("У вас нет прав для выполнения этого действия.", show_alert=True)
         return
 
-    page = int(callback.data.split("_")[1])
     barbers = await db_requests.getBarbers()
 
-    await callback.message.edit_reply_markup(
-        reply_markup=adminMastersListActionKeyboard(barbers, "adminViewMaster", page, BOOKINGS_PER_PAGE)
+    page = int(callback.data.split('_')[-1])
+
+    await callback.message.edit_text(
+        "Выберите мастера для просмотра деталей:",
+        reply_markup=getMasterSelectKeyboard(barbers, "adminViewBarber", page, BOOKINGS_PER_PAGE)
+    )
+    await callback.answer()
+
+
+# --- Просмотр деталей конкретного мастера ---
+# ЭТО НОВЫЙ ХЭНДЛЕР, КОТОРЫЙ ВАМ НУЖЕН
+@admin_masters_router.callback_query(F.data.startswith("adminViewBarber_"))
+async def handlerAdminViewSpecificBarber(callback: CallbackQuery):
+    """
+    Отображает подробную информацию о выбранном мастере.
+    """
+    if not await db_requests.isUserAdmin(callback.from_user.id):
+        await callback.answer("У вас нет прав для выполнения этого действия.", show_alert=True)
+        return
+
+    try:
+        # action_prefix_barber_id -> "adminViewBarber_123"
+        barber_id = int(callback.data.split('_')[-1])
+        barber = await db_requests.getBarberById(barber_id)
+
+        if not barber:
+            await callback.answer("Мастер не найден.", show_alert=True)
+            return
+
+        # Формируем текст с деталями о мастере
+        message_text = (
+            f"**Мастер: {barber.name}**\n"
+            f"ID: {barber.id}\n"
+            f"О мастере: {barber.description if barber.description else 'Нет описания'}\n"
+            f"Контакты: {barber.contact_info if barber.contact_info else 'Не указаны'}"
+        )
+
+    except ValueError:
+        await callback.answer("Неверные данные мастера.", show_alert=True)
+    except Exception as e:
+        await callback.answer(f"Произошла ошибка: {e}", show_alert=True)
+
+    await callback.answer()
+
+
+# Хэндлер для кнопки "Назад в меню мастеров"
+@admin_masters_router.callback_query(F.data == "adminBackToMastersMenu")
+async def handlerAdminBackToMastersMenu(callback: CallbackQuery):
+    """
+    Обрабатывает возврат из просмотра мастеров в меню управления мастерами.
+    """
+    if not await db_requests.isUserAdmin(callback.from_user.id):
+        await callback.answer("У вас нет прав для выполнения этого действия.", show_alert=True)
+        return
+    await callback.message.edit_text(
+        "Выберите действие с мастерами:",
+        reply_markup=adminMastersMenuKeyboard()
     )
     await callback.answer()
 
@@ -418,7 +472,7 @@ async def handlerAdminViewSingleMaster(callback: CallbackQuery, state: FSMContex
 
     if not barber:
         await callback.answer("Мастер не найден.", show_alert=True)
-        await handlerAdminViewMastersList(callback, state)  # Возвращаемся к списку
+        await handlerAdminViewBarbersList(callback, state)  # Возвращаемся к списку
         return
 
     service_names = [s.name for s in barber.services] if barber.services else []
@@ -444,8 +498,7 @@ async def handlerAdminViewSingleMaster(callback: CallbackQuery, state: FSMContex
 
     await callback.answer()
 
-
-# --- Удаление мастера: Шаг 1 (Выбор мастера) ---
+# Удаление мастера
 @admin_masters_router.callback_query(F.data == "adminDeleteMaster")
 async def handlerAdminDeleteMasterStart(callback: CallbackQuery, state: FSMContext):
     """
@@ -456,7 +509,8 @@ async def handlerAdminDeleteMasterStart(callback: CallbackQuery, state: FSMConte
         await callback.answer("У вас нет прав для выполнения этого действия.", show_alert=True)
         return
 
-    await state.clear()  # Очищаем любое предыдущее состояние
+    # Очищаем любое предыдущее состояние и загружаем мастеров только один раз
+    await state.clear()
     barbers = await db_requests.getBarbers()
 
     if not barbers:
@@ -465,15 +519,21 @@ async def handlerAdminDeleteMasterStart(callback: CallbackQuery, state: FSMConte
         await callback.answer()
         return
 
+    # Сохраняем список мастеров и текущую страницу в FSMContext
+    await state.update_data(barbers=barbers)
+
+    # Исправленный вызов функции
+    keyboard = getMasterSelectKeyboard(barbers, "adminSelectDeleteMaster", 0)
+
     await callback.message.edit_text(
-        """Выберите мастера для удаления:""",
-        reply_markup=adminMastersListActionKeyboard(barbers, "adminSelectDeleteMaster", 0, BOOKINGS_PER_PAGE)
+        "Выберите мастера для удаления:",
+        reply_markup=keyboard
     )
     await callback.answer()
 
 
 @admin_masters_router.callback_query(F.data.startswith("adminSelectDeleteMasterPage_"))
-async def handlerAdminDeleteMastersPaginate(callback: CallbackQuery):
+async def handlerAdminDeleteMastersPaginate(callback: CallbackQuery, state: FSMContext):
     """
     Обрабатывает пагинацию списка мастеров в режиме удаления.
     """
@@ -482,10 +542,18 @@ async def handlerAdminDeleteMastersPaginate(callback: CallbackQuery):
         return
 
     page = int(callback.data.split("_")[1])
-    barbers = await db_requests.getBarbers()
+
+    user_data = await state.get_data()
+    barbers = user_data.get('barbers')
+
+    if not barbers:
+        await callback.message.edit_text("Ошибка. Список мастеров не найден.")
+        await state.clear()
+        await callback.answer()
+        return
 
     await callback.message.edit_reply_markup(
-        reply_markup=adminMastersListActionKeyboard(barbers, "adminSelectDeleteMaster", page, BOOKINGS_PER_PAGE)
+        reply_markup=getMasterSelectKeyboard(barbers, "adminSelectDeleteMaster", page)
     )
     await callback.answer()
 
@@ -523,6 +591,9 @@ async def handlerAdminExecuteDeleteMaster(callback: CallbackQuery, state: FSMCon
     Выполняет удаление мастера из базы данных после подтверждения.
     """
     current_state = await state.get_state()
+    user_data = await state.get_data()
+    master_id = int(callback.data.split("_")[1])
+
     if current_state != AdminMasterState.deleteMasterConfirm:
         await callback.answer("Неверное действие. Пожалуйста, начните удаление мастера заново.", show_alert=True)
         await state.clear()
@@ -530,16 +601,6 @@ async def handlerAdminExecuteDeleteMaster(callback: CallbackQuery, state: FSMCon
 
     if not await db_requests.isUserAdmin(callback.from_user.id):
         await callback.answer("У вас нет прав для выполнения этого действия.", show_alert=True)
-        return
-
-    master_id = int(callback.data.split("_")[1])
-    user_data = await state.get_data()
-    # Проверка безопасности: убедиться, что ID совпадает с тем, что в состоянии
-    if user_data.get('masterToDeleteId') != master_id:
-        await callback.answer("Ошибка подтверждения. Пожалуйста, попробуйте снова.", show_alert=True)
-        await state.clear()
-        await callback.message.answer("Произошла ошибка. Возвращаемся в меню мастеров.",
-                                      reply_markup=adminMastersMenuKeyboard())
         return
 
     try:
@@ -557,19 +618,31 @@ async def handlerAdminExecuteDeleteMaster(callback: CallbackQuery, state: FSMCon
         await callback.answer()
 
 
+@admin_masters_router.callback_query(F.data == "cancelDeleteMaster")
+async def handlerAdminCancelDeleteMaster(callback: CallbackQuery, state: FSMContext):
+    """
+    Обрабатывает отмену удаления мастера и возвращает в главное меню.
+    """
+    await state.clear()
+    await callback.message.edit_text("Действие отменено.")
+    await callback.message.answer("Выберите действие с мастерами:", reply_markup=adminMastersMenuKeyboard())
+    await callback.answer()
+
 # --- Управление отпуском: Шаг 1 (Выбор мастера) ---
 @admin_masters_router.callback_query(F.data == "adminMasterVacation")
 async def handlerAdminMasterVacationStart(callback: CallbackQuery, state: FSMContext):
     """
     Начинает процесс установки отпуска для мастера.
-    Отображает список мастеров для выбора.
+    Отображает список мастеров для выбора с пагинацией.
     """
     if not await db_requests.isUserAdmin(callback.from_user.id):
         await callback.answer("У вас нет прав для выполнения этого действия.", show_alert=True)
         return
 
+    # Очищаем состояние и загружаем мастеров только один раз
     await state.clear()
-    barbers = await db_requests.getBarbers()
+    async with db_requests._async_session_factory() as session:
+        barbers = await db_requests.getBarbers()
 
     if not barbers:
         await callback.message.edit_text("Пока нет мастеров для настройки отпуска.")
@@ -577,29 +650,61 @@ async def handlerAdminMasterVacationStart(callback: CallbackQuery, state: FSMCon
         await callback.answer()
         return
 
-    await callback.message.edit_text(
-        """Выберите мастера, которого хотите отправить в отпуск:""",
-        reply_markup=adminMastersListActionKeyboard(barbers, "adminSelectVacationMaster", 0, BOOKINGS_PER_PAGE)
-    )
+    # Сохраняем список мастеров и текущую страницу в FSMContext
+    await state.update_data(barbers=barbers, page=0)
     await state.set_state(AdminMasterState.vacationChooseMaster)
+
+    keyboard = getMasterSelectKeyboard(page=0, barbers=barbers)
+    await callback.message.edit_text(
+        "Выберите мастера, которого хотите отправить в отпуск:",
+        reply_markup=keyboard
+    )
+    await callback.answer()
+
+MASTERS_PER_PAGE = 5
+
+
+@admin_masters_router.callback_query(F.data.startswith("master_vacation_page_"))
+async def handlerAdminMasterVacationPaginate(callback: CallbackQuery, state: FSMContext):
+    """
+    Обрабатывает нажатия на кнопки пагинации (стрелки).
+    """
+    data = await state.get_data()
+    barbers = data.get('barbers')
+    current_page = data.get('page', 0)
+
+    if not barbers:
+        await callback.message.edit_text("Ошибка. Список мастеров не найден.")
+        await state.clear()
+        await callback.answer()
+        return
+
+    action, page_str = callback.data.split(':')
+
+    new_page = current_page
+    if "next" in action:
+        new_page = current_page + 1
+    elif "prev" in action:
+        new_page = current_page - 1
+
+    total_pages = (len(barbers) + MASTERS_PER_PAGE - 1) // MASTERS_PER_PAGE
+
+    if 0 <= new_page < total_pages:
+        await state.update_data(page=new_page)
+        keyboard = getMasterSelectKeyboard(page=new_page, barbers=barbers)
+        await callback.message.edit_reply_markup(reply_markup=keyboard)
+
     await callback.answer()
 
 
-@admin_masters_router.callback_query(F.data.startswith("adminSelectVacationMasterPage_"))
-async def handlerAdminMasterVacationPaginate(callback: CallbackQuery):
+# Хэндлер для кнопки "Назад"
+@admin_masters_router.callback_query(F.data == "adminMastersBack")
+async def handlerAdminMastersBack(callback: CallbackQuery, state: FSMContext):
     """
-    Обрабатывает пагинацию списка мастеров в режиме отпуска.
+    Обрабатывает нажатие на кнопку "Назад", возвращая в главное меню админа.
     """
-    if not await db_requests.isUserAdmin(callback.from_user.id):
-        await callback.answer("У вас нет прав для выполнения этого действия.", show_alert=True)
-        return
-
-    page = int(callback.data.split("_")[1])
-    barbers = await db_requests.getBarbers()
-
-    await callback.message.edit_reply_markup(
-        reply_markup=adminMastersListActionKeyboard(barbers, "adminSelectVacationMaster", page, BOOKINGS_PER_PAGE)
-    )
+    await state.clear()
+    await callback.message.edit_text("Выберите действие с мастерами:", reply_markup=adminMastersMenuKeyboard())
     await callback.answer()
 
 
@@ -741,6 +846,7 @@ async def handlerAdminConfirmVacation(callback: CallbackQuery, state: FSMContext
         await state.clear()
         return
 
+    # Проверка на права администратора
     if not await db_requests.isUserAdmin(callback.from_user.id):
         await callback.answer("У вас нет прав для выполнения этого действия.", show_alert=True)
         return
@@ -751,16 +857,21 @@ async def handlerAdminConfirmVacation(callback: CallbackQuery, state: FSMContext
     end_date = user_data.get('vacationEndDate')
     master_name = user_data.get('vacationMasterName')
 
-    if not master_id or not start_date or not end_date:
-        await callback.message.edit_text("Произошла ошибка. Пожалуйста, начните настройку отпуска заново.")
-        await callback.message.answer("Выберите действие с мастерами:", reply_markup=adminMastersMenuKeyboard())
+    if not all([master_id, start_date, end_date]):
+        await callback.message.edit_text("Произошла ошибка. Не удалось получить данные об отпуске. Пожалуйста, начните настройку заново.")
         await state.clear()
         await callback.answer("Ошибка: неполные данные.", show_alert=True)
         return
 
     try:
-        await db_requests.addMasterVacation(master_id, start_date, end_date)
+        # Используем глобальную фабрику сессий
+        if db_requests._async_session_factory is None:
+            raise RuntimeError("Фабрика сессий базы данных не инициализирована.")
+        async with db_requests._async_session_factory() as session:
+            await db_requests.addMasterVacation(session, master_id, start_date, end_date)
+
         await callback.message.edit_text(f"✅ Отпуск для мастера <b>{master_name}</b> успешно добавлен!")
+
     except Exception as e:
         print(f"Ошибка при добавлении отпуска мастера: {e}")
         await callback.message.edit_text("Произошла ошибка при добавлении отпуска. Пожалуйста, попробуйте позже.")
@@ -768,6 +879,7 @@ async def handlerAdminConfirmVacation(callback: CallbackQuery, state: FSMContext
         await state.clear()
         await callback.message.answer("Выберите действие с мастерами:", reply_markup=adminMastersMenuKeyboard())
         await callback.answer()
+
 
 
 @admin_masters_router.callback_query(F.data == "adminCancelVacation")

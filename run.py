@@ -20,7 +20,6 @@ from app.scheduler import jobs  # Новый импорт: модуль с за�
 # Импорты роутеров
 from app.handlers.user import handler_start, handler_appointment, handler_my_bookings, handler_more_services, \
     handler_registration, handler_support
-# Убедитесь, что handler_admin.py содержит admin_router
 from app.handlers.admin import handler_services, handler_masters, handler_statistics, handler_calendar
 
 
