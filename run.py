@@ -105,7 +105,7 @@ async def main():
     jobs.initialize_scheduler_dependencies(bot, db_requests, ADMIN_CHAT_ID)
 
     # Добавляем задачу: отправлять напоминания каждое утро в 8:00
-    scheduler.add_job(jobs.sendDailyReminders, 'cron', hour=8, minute=0)
+    scheduler.add_job(jobs.sendDailyReminders, 'cron', hour=17, minute=29)
     logger.info("Запланирована ежедневная отправка напоминаний в 08:00 МСК.")
     scheduler.start()
     logger.info("Планировщик APScheduler запущен.")

@@ -404,23 +404,31 @@ async def getMasterBookingStatistics(start_date: Optional[date] = None, end_date
 
 async def getBookingsForDate(target_date: date) -> List[Booking]:
     """
-    Получает все активные записи на конкретную дату, жадно загружая связанные услуги и мастеров.
+    Получает все активные записи на конкретную дату,
+    жадно загружая связанные объекты: услугу, мастера и пользователя.
     """
     if _async_session_factory is None:
         raise RuntimeError("Фабрика сессий базы данных не инициализирована.")
+
     async with _async_session_factory() as session:
-        # Для поиска записей на конкретный день, сравниваем только дату
-        # booking_date - это DateTime, поэтому нужно сравнить только компонент даты
-        stmt = select(Booking).where(
-            func.date(Booking.booking_date) == target_date,
-            Booking.status == "active"
-        ).options(
-            joinedload(Booking.service), # Жадно загружаем связанную услугу
-            joinedload(Booking.barber)   # Жадно загружаем связанного мастера
-        ).order_by(Booking.booking_date) # Сортируем по времени записи
+        stmt = (
+            select(Booking)
+            .where(
+                func.date(Booking.booking_date) == target_date,
+                Booking.status == "active"
+            )
+            .options(
+                joinedload(Booking.service),  # Жадная загрузка услуги
+                joinedload(Booking.barber),   # Жадная загрузка мастера
+                joinedload(Booking.user)      # Жадная загрузка пользователя
+            )
+            .order_by(Booking.booking_date)  # Сортировка по времени записи
+        )
 
         result = await session.execute(stmt)
-        return result.scalars().all()
+        bookings = result.scalars().all()
+
+        return bookings
 
 async def addBooking(user_id: int, service_id: int, barber_id: Optional[int], booking_date: date, booking_time: str) -> Booking:
     """
