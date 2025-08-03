@@ -619,77 +619,75 @@ def adminStatisticsCalendarKeyboard(current_date: date = None, min_date: date = 
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
+from datetime import date, timedelta
+import calendar
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+
+
 def adminCalendarKeyboard(current_date: date = None) -> InlineKeyboardMarkup:
     """
-    Генерирует инлайн-клавиатуру календаря для выбора даты в админ-панели.
-    Показывает только сегодняшние и будущие даты.
+    Календарь для админ-панели с русскими месяцами и датами:
+    « 2024 | • 2025 • | 2026 »
+    « Июль | • Август • | Сентябрь »
     """
     if current_date is None:
         current_date = date.today()
 
+    year = current_date.year
+    month = current_date.month
     today = date.today()
 
     keyboard = []
 
-    # Навигация по году
-    year_buttons = [
-        InlineKeyboardButton(text=f"« {current_date.year - 1}", callback_data=f"adminCalYear_{current_date.year - 1}"),
-        InlineKeyboardButton(text=f"{current_date.year}", callback_data="ignore"),
-        InlineKeyboardButton(text=f"{current_date.year + 1} »", callback_data=f"adminCalYear_{current_date.year + 1}")
-    ]
-    keyboard.append(year_buttons)
+    # --- 1. Навигация по годам ---
+    keyboard.append([
+        InlineKeyboardButton(text=f"{year-1}", callback_data=f"adminCalYear_{year-1}_{month}"),
+        InlineKeyboardButton(text=f"• {year} •", callback_data="ignore"),
+        InlineKeyboardButton(text=f"{year+1}", callback_data=f"adminCalYear_{year+1}_{month}")
+    ])
 
-    # Навигация по месяцу
-    month_buttons = [
-        InlineKeyboardButton(text="« Предыдущий",
-                             callback_data=f"adminCalMonth_{(current_date.replace(day=1) - timedelta(days=1)).strftime('%Y-%m')}"),
-        InlineKeyboardButton(text=f"{current_date.strftime('%B %Y')}", callback_data="ignore"),
-        InlineKeyboardButton(text="Следующий »",
-                             callback_data=f"adminCalMonth_{(current_date.replace(day=28) + timedelta(days=4)).replace(day=1).strftime('%Y-%m')}")
-    ]
-    keyboard.append(month_buttons)
+    # --- 2. Навигация по месяцам ---
+    prev_month = (month - 2) % 12 + 1
+    next_month = month % 12 + 1
 
-    # Дни недели
-    week_days = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
-    keyboard.append([InlineKeyboardButton(text=day, callback_data="ignore") for day in week_days])
+    keyboard.append([
+        InlineKeyboardButton(text=MONTHS_RU[prev_month-1],
+                             callback_data=f"adminCalMonth_{year}-{prev_month:02d}"),
+        InlineKeyboardButton(text=f"• {MONTHS_RU[month-1]} •", callback_data="ignore"),
+        InlineKeyboardButton(text=MONTHS_RU[next_month-1],
+                             callback_data=f"adminCalMonth_{year}-{next_month:02d}")
+    ])
 
-    # Дни месяца
-    first_day_of_month = current_date.replace(day=1)
-    # Определяем, какой день недели является первым днем месяца (Пн=0, Вс=6)
-    start_offset = (first_day_of_month.weekday()) % 7
+    # --- 3. Дни недели ---
+    keyboard.append([InlineKeyboardButton(text=day, callback_data="ignore") for day in WEEKDAYS_RU])
 
-    # Создаем пустые кнопки для начала недели, если месяц начинается не с понедельника
-    current_week = [InlineKeyboardButton(text=" ", callback_data="ignore")] * start_offset
+    # --- 4. Сетка дней месяца ---
+    cal = calendar.Calendar(firstweekday=calendar.MONDAY)
+    for week in cal.monthdayscalendar(year, month):
+        row = []
+        for day in week:
+            if day == 0:
+                row.append(InlineKeyboardButton(text=" ", callback_data="ignore"))
+            else:
+                day_date = date(year, month, day)
+                if day_date < today:
+                    row.append(InlineKeyboardButton(text=" ", callback_data="ignore"))
+                else:
+                    btn_text = f"[{day}]" if day_date == today else str(day)
+                    row.append(
+                        InlineKeyboardButton(
+                            text=btn_text,
+                            callback_data=f"adminCalDate_{day_date.strftime('%Y-%m-%d')}"
+                        )
+                    )
+        keyboard.append(row)
 
-    # Количество дней в текущем месяце
-    num_days_in_month = (current_date.replace(month=current_date.month % 12 + 1, day=1) - timedelta(days=1)).day
-
-    for day_num in range(1, num_days_in_month + 1):
-        current_day = date(current_date.year, current_date.month, day_num)
-        button_text = str(day_num)
-        callback_data = f"adminCalDate_{current_day.strftime('%Y-%m-%d')}"
-
-        # Отключаем кнопки для прошедших дат
-        if current_day < today:
-            current_week.append(InlineKeyboardButton(text=" ", callback_data="ignore"))  # Неактивная кнопка
-        else:
-            if current_day == today:
-                button_text = f"[{day_num}]"  # Обозначаем сегодняшний день
-            current_week.append(InlineKeyboardButton(text=button_text, callback_data=callback_data))
-
-        if len(current_week) == 7:
-            keyboard.append(current_week)
-            current_week = []
-
-    if current_week:
-        # Добавляем пустые кнопки, если последняя неделя неполная
-        while len(current_week) < 7:
-            current_week.append(InlineKeyboardButton(text=" ", callback_data="ignore"))
-        keyboard.append(current_week)
-
+    # --- 5. Кнопка назад ---
     keyboard.append([InlineKeyboardButton(text="🔙 Назад", callback_data="adminBackToAdminMenuFromCalendar")])
 
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
 
 
 def adminDayBookingsKeyboard() -> InlineKeyboardMarkup:
@@ -701,84 +699,81 @@ def adminDayBookingsKeyboard() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-# Названия месяцев и дней недели на русском языке
+
+# Русские дни недели
 WEEKDAYS_RU = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
 
 
 def calendar_keyboard(current_date: date = None, service_id: int = None) -> InlineKeyboardMarkup:
     """
-    Генерирует инлайн-клавиатуру с календарем на заданный месяц и год.
-
-    Args:
-        current_date (date): Текущая дата для отображения календаря. Если None, используется date.today().
-        service_id (int): ID выбранной услуги для передачи в callback_data.
-    Returns:
-        InlineKeyboardMarkup: Объект клавиатуры.
+    Календарь с навигацией в формате:
+    « 2024 | • 2025 • | 2026 »
+    « Июль | • Август • | Сентябрь »
     """
     if current_date is None:
         current_date = date.today()
 
     year = current_date.year
     month = current_date.month
+    today = date.today()
 
     builder = InlineKeyboardBuilder()
 
-    today = date.today()
-
-    # Заголовки: Год и Месяц
+    # --- 1. Навигация по годам ---
     builder.row(
-        InlineKeyboardButton(text=f"<< {year - 1}", callback_data=f"navigateYear_{year - 1}_{month}_{service_id}"),
-        InlineKeyboardButton(text=f"{MONTHS_RU[month - 1]} {year}", callback_data="ignore"),
-        InlineKeyboardButton(text=f"{year + 1} >>", callback_data=f"navigateYear_{year + 1}_{month}_{service_id}")
+        InlineKeyboardButton(text=f"{year-1}", callback_data=f"navigateYear_{year-1}_{month}_{service_id}"),
+        InlineKeyboardButton(text=f"• {year} •", callback_data="ignore"),
+        InlineKeyboardButton(text=f"{year+1}", callback_data=f"navigateYear_{year+1}_{month}_{service_id}")
     )
 
-    # Дни недели (Пн, Вт, Ср, ...) - некликабельные заголовки
+    # --- 2. Навигация по месяцам ---
+    prev_month = (month - 2) % 12 + 1  # предыдущий месяц
+    next_month = month % 12 + 1        # следующий месяц
+
+    builder.row(
+        InlineKeyboardButton(
+            text=f"{MONTHS_RU[prev_month-1]}",
+            callback_data=f"navigateMonth_{year}-{prev_month:02d}_{service_id}"
+        ),
+        InlineKeyboardButton(
+            text=f"• {MONTHS_RU[month-1]} •",
+            callback_data="ignore"
+        ),
+        InlineKeyboardButton(
+            text=f"{MONTHS_RU[next_month-1]}",
+            callback_data=f"navigateMonth_{year}-{next_month:02d}_{service_id}"
+        )
+    )
+
+    # --- 3. Дни недели ---
     weekday_buttons = [InlineKeyboardButton(text=day, callback_data="ignore") for day in WEEKDAYS_RU]
     builder.row(*weekday_buttons)
 
-    # Дни месяца
+    # --- 4. Сетка дней месяца ---
     cal = calendar.Calendar(firstweekday=calendar.MONDAY)
     for week in cal.monthdayscalendar(year, month):
         day_buttons = []
         for day in week:
             if day == 0:
-                # Пустая кнопка для дней вне текущего месяца
                 day_buttons.append(InlineKeyboardButton(text=" ", callback_data="ignore"))
             else:
                 day_date = date(year, month, day)
-                # Блокируем даты, которые уже прошли
+                # Блокируем прошлые даты
                 if day_date < today:
                     day_buttons.append(InlineKeyboardButton(text=f"~{day}~", callback_data="ignore"))
                 else:
-                    # В callback_data добавляем service_id
-                    day_buttons.append(InlineKeyboardButton(text=str(day),
-                                                            callback_data=f"chooseDate_{day_date.strftime('%Y-%m-%d')}_{service_id}"))
+                    day_buttons.append(
+                        InlineKeyboardButton(
+                            text=str(day),
+                            callback_data=f"chooseDate_{day_date.strftime('%Y-%m-%d')}_{service_id}"
+                        )
+                    )
         builder.row(*day_buttons)
 
-    # Кнопки для переключения месяцев
-    prev_month_date = date(year, month, 1) - timedelta(days=1)
-    next_month_date = date(year, month, 28) + timedelta(days=4)
-
-    prev_month_btn = InlineKeyboardButton(
-        text="< Назад",
-        # В callback_data добавляем service_id
-        callback_data=f"navigateMonth_{prev_month_date.strftime('%Y-%m')}_{service_id}"
+    # --- 5. Кнопка выхода ---
+    builder.row(
+        InlineKeyboardButton(text="🔙 Выход из календаря", callback_data="backToMainMenu")
     )
-    next_month_btn = InlineKeyboardButton(
-        text="Вперед >",
-        # В callback_data добавляем service_id
-        callback_data=f"navigateMonth_{next_month_date.strftime('%Y-%m')}_{service_id}"
-    )
-
-    # Кнопка "Назад", которая выведет из календаря в главное меню
-    main_back_button = InlineKeyboardButton(
-        text="🔙 Выход из календаря",
-        callback_data="backToMainMenu"
-    )
-
-    # Формируем последнюю строку с навигацией по месяцам и кнопку "Назад"
-    builder.row(prev_month_btn, next_month_btn)
-    builder.row(main_back_button)
 
     return builder.as_markup()
 
@@ -814,7 +809,7 @@ def single_service_details_keyboard_with_nav(
     builder.adjust(3)
 
     # Дополнительные кнопки
-    builder.row(InlineKeyboardButton(text="❌ Отменить заполнение", callback_data="cancelForm"))
+    builder.row(InlineKeyboardButton(text="❌ Назад", callback_data="cancelForm"))
 
     return builder.as_markup()
 
@@ -853,3 +848,12 @@ def get_final_booking_card_content(
     ])
 
     return card_text, keyboard
+
+
+def backToMastersKeyboard() -> InlineKeyboardMarkup:
+    """
+    Клавиатура с кнопкой Назад к списку мастеров.
+    """
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="adminViewMasters")]
+    ])

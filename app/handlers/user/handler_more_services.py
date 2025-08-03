@@ -70,11 +70,12 @@ async def send_service_details(
         next_service_id: int
 ):
     """Вспомогательная функция для отправки деталей услуги."""
+    # Формируем текст без лишних слов
     service_info_text = (
         f"<b>{service.name}</b>\n\n"
-        f"Описание: {service.description}\n"
-        f"Цена: {service.price} руб.\n"
-        f"Длительность: {service.duration_hours} час{'а' if 1 < service.duration_hours < 5 else ('ов' if service.duration_hours >= 5 else '')}\n"
+        f"{service.description}\n\n"
+        f"<i>{service.price} руб.</i>\n"
+        f"{service.duration_hours} час{'а' if 1 < service.duration_hours < 5 else ('ов' if service.duration_hours >= 5 else '')}"
     )
 
     await send_method(

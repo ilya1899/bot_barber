@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, Asyn
 from sqlalchemy.exc import SQLAlchemyError
 from app.database.models import Base  # Для создания таблиц
 from app.database import requests as db_requests  # Импортируем наш модуль с запросами к БД
-
+from app.database import _async_session_factory
 # Импорты для APScheduler
 from apscheduler.schedulers.asyncio import AsyncIOScheduler  # Новый импорт
 from app.scheduler import jobs  # Новый импорт: модуль с запланированными задачами
@@ -58,8 +58,8 @@ async def main():
             class_=AsyncSession
         )
 
+        # Передаем созданную фабрику сессий в модуль с запросами
         db_requests.initialize_db_requests(async_session_factory)
-        logger.info("Фабрика сессий базы данных инициализирована и передана в db_requests.")
 
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)

@@ -115,7 +115,7 @@ async def handler_view_single_booking(callback: CallbackQuery):
 @my_bookings_router.callback_query(F.data.startswith("cancelSingleBooking_"))
 async def handler_cancel_single_booking(callback: CallbackQuery):
     """
-    Отмена выбранной записи.
+    Отмена выбранной записи — теперь удаление из базы.
     """
     booking_id = int(callback.data.split("_")[1])
     user_id = callback.from_user.id
@@ -133,17 +133,18 @@ async def handler_cancel_single_booking(callback: CallbackQuery):
         await callback.answer("Нельзя отменить прошедшую запись.", show_alert=True)
         return
 
-    success = await db_requests.cancelBooking(booking_id)
+    success = await db_requests.deleteBooking(booking_id)  # <-- тут изменили
     if success:
-        await callback.message.edit_text("""✅ Запись отменена.""")
+        await callback.message.edit_text("""✅ Запись удалена.""")
     else:
-        await callback.message.edit_text("""Произошла ошибка при отмене записи. Попробуйте позже.""")
+        await callback.message.edit_text("""Произошла ошибка при удалении записи. Попробуйте позже.""")
 
     await callback.message.answer(
         """Вы вернулись в главное меню.""",
         reply_markup=main_menu_keyboard
     )
     await callback.answer()
+
 
 
 @my_bookings_router.callback_query(F.data.startswith("repeatBooking_"))
@@ -164,9 +165,45 @@ async def handler_repeat_booking(callback: CallbackQuery, state):
         return
 
     # Тут вызываем календарь (пример)
-    await state.set_state(BookingState.choose_date)
+    await state.set_state(BookingState.choosingDate)
     await callback.message.edit_text(
         """Выберите дату для повторной записи:""",
         reply_markup=calendar_keyboard()
+    )
+    await callback.answer()
+
+@my_bookings_router.callback_query(F.data == "backToBookingsList")
+async def handler_back_to_bookings_list(callback: CallbackQuery):
+    """
+    Возвращает пользователя на список его записей.
+    """
+    user_id = callback.from_user.id
+    bookings = await db_requests.getUserBookings(user_id)
+
+    if not bookings:
+        await callback.message.edit_text(
+            """У вас пока нет активных записей.""",
+            reply_markup=main_menu_keyboard
+        )
+        await callback.answer()
+        return
+
+    # Сортировка: будущие → прошедшие
+    future_bookings = sorted(
+        [b for b in bookings if b.booking_date >= datetime.now()],
+        key=lambda x: x.booking_date
+    )
+    past_bookings = sorted(
+        [b for b in bookings if b.booking_date < datetime.now()],
+        key=lambda x: x.booking_date,
+        reverse=True
+    )
+    sorted_bookings = future_bookings + past_bookings
+
+    await callback.message.edit_text(
+        """Ваши записи (сортировка по дате):
+
+Выберите запись для просмотра деталей:""",
+        reply_markup=create_bookings_list_keyboard(sorted_bookings, 0)
     )
     await callback.answer()

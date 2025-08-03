@@ -27,5 +27,6 @@ admin_menu_keyboard = ReplyKeyboardMarkup(
         [KeyboardButton(text="⬅️ Выйти из админ-панели")]
     ],
     resize_keyboard=True,
-    input_field_placeholder="Админ-панель"
+    input_field_placeholder="Админ-панель",
+    one_time_keyboard=True
 )

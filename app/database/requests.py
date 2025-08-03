@@ -1,18 +1,18 @@
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy import select, update, delete, and_
 from sqlalchemy.orm import selectinload
-from app.database.models import User, Service, Barber, Booking, Admin, BarberVacation, barber_service_association_table
 from typing import List, Optional, Tuple, Callable
 from sqlalchemy import func, extract
 from sqlalchemy.orm import joinedload
 from datetime import date, datetime, timedelta
 
-# Глобальная переменная для хранения фабрики сессий
-_async_session_factory: async_sessionmaker[AsyncSession] | None = None
+from app.database import _async_session_factory
+from app.database.models import User, Service, Barber, Booking, Admin, BarberVacation, barber_service_association_table
 
-def initialize_db_requests(session_factory: async_sessionmaker[AsyncSession]):
+def initialize_db_requests(session_factory):
     global _async_session_factory
     _async_session_factory = session_factory
+
 
 # --- Функции для модели User ---
 async def addUser(user_id: int, username: str, firstName: str, lastName: str) -> User:
@@ -123,24 +123,52 @@ async def deleteService(service_id: int) -> bool:
         return result.rowcount > 0
 
 # --- Функции для модели Barber ---
-async def addBarber(name: str, description: str, photo_id: Optional[str], service_ids: List[int]) -> Barber:
-    if _async_session_factory is None:
-        raise RuntimeError("Фабрика сессий базы данных не инициализирована.")
+import traceback, logging
+
+logger = logging.getLogger(__name__)
+
+from sqlalchemy.orm import selectinload
+
+async def addBarber(session: AsyncSession, name: str, description: str, photo_id: int, service_ids: list[int]):
+    new_barber = Barber(name=name, description=description, photo_id=photo_id)
+    if service_ids:
+        # Получаем сервисы из базы
+        result = await session.execute(select(Service).where(Service.id.in_(service_ids)))
+        services = result.scalars().all()
+        new_barber.services.extend(services)
+
+    session.add(new_barber)
+    await session.commit()
+    await session.refresh(new_barber)
+    return new_barber
+
+async def get_barber_with_services(barber_id: int):
+    """
+    Возвращает мастера с привязанными услугами.
+    """
     async with _async_session_factory() as session:
-        barber = Barber(name=name, description=description, photo_id=photo_id)
-        session.add(barber)
-        # await session.flush()  # можно закомментировать, если не требуется
+        result = await session.execute(
+            select(Barber)
+            .options(selectinload(Barber.services))  # подгружаем услуги
+            .where(Barber.id == barber_id)
+        )
+        return result.scalars().first()
 
-        if service_ids:
-            services_stmt = select(Service).where(Service.id.in_(service_ids))
-            services_result = await session.execute(services_stmt)
-            selected_services = services_result.scalars().all()
-            barber.services.extend(selected_services)
+async def get_busy_barbers_by_datetime(date_: date, time_: str) -> list[int]:
+    # Соберём datetime из date_ и time_ (time_ в формате "HH:MM")
+    booking_datetime = datetime.strptime(f"{date_} {time_}", "%Y-%m-%d %H:%M")
 
-        await session.commit()
-        await session.refresh(barber)
-        return barber
-
+    async with _async_session_factory() as session:
+        result = await session.execute(
+            select(Booking.barber_id)
+            .where(
+                Booking.booking_date == booking_datetime,
+                Booking.barber_id.isnot(None),
+                Booking.status == "active"  # если нужно учитывать только активные записи
+            )
+        )
+        busy_barber_ids = [row[0] for row in result.unique().all()]
+    return busy_barber_ids
 
 async def getBarbers() -> List[Barber]:
     """
@@ -451,4 +479,20 @@ async def deleteBarber(barber_id: int) -> bool:
         )
 
         await session.commit()
+        return result.rowcount > 0
+
+
+async def deleteBooking(booking_id: int) -> bool:
+    """
+    Полностью удаляет запись по её ID.
+    Возвращает True, если запись была удалена.
+    """
+    if _async_session_factory is None:
+        raise RuntimeError("Фабрика сессий базы данных не инициализирована.")
+
+    async with _async_session_factory() as session:
+        stmt = delete(Booking).where(Booking.id == booking_id)
+        result = await session.execute(stmt)
+        await session.commit()
+
         return result.rowcount > 0

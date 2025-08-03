@@ -38,13 +38,25 @@ class Service(Base):
 
 class Barber(Base):
     __tablename__ = 'barbers'
+
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String, nullable=False, unique=True)
     description = Column(String)
     photo_id = Column(String, nullable=True)
 
-    bookings = relationship("Booking", back_populates="barber")
-    services = relationship("Service", secondary=barber_service_association_table, back_populates="barbers")
+    bookings = relationship(
+        "Booking",
+        back_populates="barber",
+        lazy="selectin"  # <-- добавляем
+    )
+
+    services = relationship(
+        "Service",
+        secondary=barber_service_association_table,
+        back_populates="barbers",
+        lazy="selectin"  # <-- добавляем
+    )
+
 
 
 class Booking(Base):

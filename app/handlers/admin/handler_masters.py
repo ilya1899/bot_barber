@@ -1,6 +1,6 @@
 # app/handlers/admin/handler_masters.py
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery, FSInputFile
+from aiogram.types import Message, CallbackQuery, FSInputFile, InputMediaPhoto
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from datetime import date, datetime, timedelta
@@ -11,7 +11,7 @@ from app.keyboards.kbinline import (
     adminMastersMenuKeyboard, adminAddMasterConfirmKeyboard,
     getMasterSelectKeyboard, adminSingleMasterViewKeyboard,
     adminConfirmDeleteMasterKeyboard, adminMasterServicesSelectionKeyboard,
-    adminMasterVacationCalendarKeyboard, adminMasterVacationConfirmKeyboard
+    adminMasterVacationCalendarKeyboard, adminMasterVacationConfirmKeyboard, backToMastersKeyboard
 )
 from app.database import requests as db_requests
 from app.database.models import Barber, Service  # Для типизации
@@ -264,69 +264,70 @@ async def displayAddMasterFinalCard(message: Message, state: FSMContext):
 
 
 # --- Добавление мастера: Подтверждение/Отмена ---
+import logging, traceback
+logger = logging.getLogger(__name__)
+
 import logging
+import traceback
+from aiogram import F
+from aiogram.types import CallbackQuery
+from aiogram.fsm.context import FSMContext
 
 logger = logging.getLogger(__name__)
 
 @admin_masters_router.callback_query(F.data == "adminConfirmAddMaster")
 async def handlerAdminConfirmAddMaster(callback: CallbackQuery, state: FSMContext):
-    logger.info("handlerAdminConfirmAddMaster: старт обработки")
+    """
+    Подтверждает добавление нового мастера в БД.
+    """
+    data = await state.get_data()
 
-    current_state = await state.get_state()
-    logger.debug(f"Текущий state: {current_state}")
-    if current_state != AdminMasterState.addMasterConfirm:
-        await callback.answer("Неверное действие. Пожалуйста, начните добавление мастера заново.", show_alert=True)
+    # Используем правильные ключи, которые сохраняли ранее
+    master_full_name = data.get('newMasterFullName')
+    master_comment = data.get('newMasterComment')
+    master_photo_id = data.get('newMasterPhotoId')
+    selected_service_ids = data.get('newMasterSelectedServiceIds', [])
+
+    if not master_full_name:
+        await callback.message.answer("Ошибка: не указано ФИО мастера. Попробуйте начать заново.")
         await state.clear()
-        logger.warning("Неверный state, сброс состояния")
         return
-
-    if not await db_requests.isUserAdmin(callback.from_user.id):
-        await callback.answer("У вас нет прав для выполнения этого действия.", show_alert=True)
-        logger.warning(f"Пользователь {callback.from_user.id} не админ")
-        return
-
-    user_data = await state.get_data()
-    logger.debug(f"Данные из state: {user_data}")
-
-    master_full_name = user_data.get('newMasterFullName')
-    master_comment = user_data.get('newMasterComment')
-    master_photo_id = user_data.get('newMasterPhotoId')
-    selected_service_ids = user_data.get('newMasterSelectedServiceIds', [])
-    last_admin_message_id = user_data.get('lastAdminMessageId')
 
     try:
-        logger.info(f"Попытка добавить мастера: {master_full_name}")
-        new_barber = await db_requests.addBarber(
-            name=master_full_name,
-            description=master_comment,
-            photo_id=master_photo_id,
-            service_ids=selected_service_ids
-        )
-        logger.info(f"Мастер добавлен: ID={new_barber.id}, Имя={new_barber.name}")
+        async with db_requests._async_session_factory() as session:
+            # Добавляем мастера
+            new_barber = await db_requests.addBarber(
+                session=session,
+                name=master_full_name,
+                description=master_comment,
+                photo_id=master_photo_id,
+                service_ids=selected_service_ids
+            )
 
-        if last_admin_message_id:
-            try:
-                await callback.bot.delete_message(chat_id=callback.message.chat.id, message_id=last_admin_message_id)
-                logger.debug(f"Предыдущее сообщение {last_admin_message_id} удалено")
-            except Exception as delete_e:
-                logger.error(f"Ошибка при удалении предыдущего сообщения: {delete_e}")
+            # Получаем мастера с привязанными услугами
+            barber_with_services = await db_requests.get_barber_with_services(new_barber.id)
 
-        await callback.message.answer(f"✅ Мастер <b>{new_barber.name}</b> успешно добавлен!")
+            if barber_with_services is None:
+                await callback.message.answer("Ошибка: мастер не найден после добавления.")
+                return
+
+            # Формируем текст с экранированием HTML
+            import html
+            services_names = ', '.join([html.escape(service.name) for service in barber_with_services.services])
+
+            await callback.message.answer(
+                f"Мастер <b>{html.escape(barber_with_services.name)}</b> добавлен с услугами: {services_names}",
+                parse_mode="HTML"
+            )
+
+            await state.clear()
+
     except Exception as e:
-        logger.error(f"Ошибка при добавлении мастера: {e}", exc_info=True)
-        if last_admin_message_id:
-            try:
-                await callback.bot.delete_message(chat_id=callback.message.chat.id, message_id=last_admin_message_id)
-                logger.debug(f"Предыдущее сообщение {last_admin_message_id} удалено после ошибки")
-            except Exception as delete_e:
-                logger.error(f"Ошибка при удалении сообщения после ошибки добавления: {delete_e}")
+        import traceback
+        await callback.message.answer(
+            "Произошла ошибка при добавлении мастера:\n" + "".join(traceback.format_exception_only(type(e), e))
+        )
 
-        await callback.message.answer("Произошла ошибка при добавлении мастера. Пожалуйста, попробуйте позже.")
-    finally:
-        await state.clear()
-        await callback.message.answer("Выберите действие с мастерами:", reply_markup=adminMastersMenuKeyboard())
-        await callback.answer()
-        logger.info("handlerAdminConfirmAddMaster: обработка завершена")
 
 @admin_masters_router.callback_query(F.data == "adminCancelAddMaster")
 async def handlerAdminCancelAddMaster(callback: CallbackQuery, state: FSMContext):
@@ -359,8 +360,7 @@ async def handlerAdminCancelAddMaster(callback: CallbackQuery, state: FSMContext
 
 
 # --- Просмотр мастеров ---
-@admin_masters_router.callback_query(
-    F.data == "adminViewBarbers")  # Убедитесь, что это правильный callback для вызова списка
+@admin_masters_router.callback_query(F.data == "adminViewMasters")
 async def handlerAdminViewBarbersList(callback: CallbackQuery, state: FSMContext):
     """
     Отображает список всех мастеров с пагинацией для просмотра.
@@ -374,16 +374,32 @@ async def handlerAdminViewBarbersList(callback: CallbackQuery, state: FSMContext
     barbers = await db_requests.getBarbers()
 
     if not barbers:
-        await callback.message.edit_text("Пока нет добавленных мастеров.")
-        await callback.message.answer("Выберите действие с мастерами:", reply_markup=adminMastersMenuKeyboard())
+        # Если мастеров нет
+        if callback.message.photo:  # сообщение с фото
+            await callback.message.delete()
+            await callback.message.answer("Пока нет добавленных мастеров.",
+                                          reply_markup=adminMastersMenuKeyboard())
+        else:  # обычный текст
+            await callback.message.edit_text("Пока нет добавленных мастеров.",
+                                             reply_markup=adminMastersMenuKeyboard())
         await callback.answer()
         return
 
-    await callback.message.edit_text(
-        "Выберите мастера для просмотра деталей:",
-        reply_markup=getMasterSelectKeyboard(barbers, "adminViewBarber", 0, BOOKINGS_PER_PAGE)
-    )
+    # Генерация клавиатуры со списком мастеров
+    keyboard = getMasterSelectKeyboard(barbers, "adminViewBarber", 0)
+
+    if callback.message.photo:
+        # Если текущее сообщение — фото, удаляем и отправляем новое
+        await callback.message.delete()
+        await callback.message.answer("Выберите мастера для просмотра деталей:",
+                                      reply_markup=keyboard)
+    else:
+        # Если текущее сообщение — текст, редактируем его
+        await callback.message.edit_text("Выберите мастера для просмотра деталей:",
+                                         reply_markup=keyboard)
+
     await callback.answer()
+
 
 
 @admin_masters_router.callback_query(F.data.startswith("adminViewBarberPage_"))
@@ -407,32 +423,63 @@ async def handlerAdminViewBarbersPaginate(callback: CallbackQuery):
 
 
 # --- Просмотр деталей конкретного мастера ---
-# ЭТО НОВЫЙ ХЭНДЛЕР, КОТОРЫЙ ВАМ НУЖЕН
 @admin_masters_router.callback_query(F.data.startswith("adminViewBarber_"))
 async def handlerAdminViewSpecificBarber(callback: CallbackQuery):
     """
-    Отображает подробную информацию о выбранном мастере.
+    Отображает подробную информацию о выбранном мастере с фото (если есть).
     """
     if not await db_requests.isUserAdmin(callback.from_user.id):
         await callback.answer("У вас нет прав для выполнения этого действия.", show_alert=True)
         return
 
     try:
-        # action_prefix_barber_id -> "adminViewBarber_123"
         barber_id = int(callback.data.split('_')[-1])
-        barber = await db_requests.getBarberById(barber_id)
 
+        # Загружаем мастера с привязанными услугами
+        barber = await db_requests.get_barber_with_services(barber_id)
         if not barber:
             await callback.answer("Мастер не найден.", show_alert=True)
             return
 
-        # Формируем текст с деталями о мастере
-        message_text = (
-            f"**Мастер: {barber.name}**\n"
-            f"ID: {barber.id}\n"
-            f"О мастере: {barber.description if barber.description else 'Нет описания'}\n"
-            f"Контакты: {barber.contact_info if barber.contact_info else 'Не указаны'}"
+        # Формируем список услуг
+        services_names = (
+            ', '.join(service.name for service in barber.services)
+            if barber.services else "Нет привязанных услуг"
         )
+
+        # Формируем текст с деталями
+        message_text = (
+            f"<b>Мастер:</b> {barber.name}\n"
+            f"<b>ID:</b> {barber.id}\n"
+            f"<b>О мастере:</b> {barber.description if barber.description else 'Нет описания'}\n"
+            f"<b>Услуги:</b> {services_names}"
+        )
+
+        # Отображаем фото или текст
+        if barber.photo_id:
+            try:
+                await callback.message.edit_media(
+                    media=InputMediaPhoto(
+                        media=barber.photo_id,
+                        caption=message_text,
+                        parse_mode="HTML"
+                    ),
+                    reply_markup=backToMastersKeyboard()
+                )
+            except Exception:
+                await callback.message.delete()
+                await callback.message.answer_photo(
+                    photo=barber.photo_id,
+                    caption=message_text,
+                    parse_mode="HTML",
+                    reply_markup=backToMastersKeyboard()
+                )
+        else:
+            await callback.message.edit_text(
+                message_text,
+                reply_markup=backToMastersKeyboard(),
+                parse_mode="HTML"
+            )
 
     except ValueError:
         await callback.answer("Неверные данные мастера.", show_alert=True)
@@ -440,6 +487,9 @@ async def handlerAdminViewSpecificBarber(callback: CallbackQuery):
         await callback.answer(f"Произошла ошибка: {e}", show_alert=True)
 
     await callback.answer()
+
+
+
 
 
 # Хэндлер для кнопки "Назад в меню мастеров"

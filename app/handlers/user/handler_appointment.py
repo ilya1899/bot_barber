@@ -160,35 +160,49 @@ async def handlerChooseTime(callback: CallbackQuery):
     chosen_date_str = parts[2]
     service_id = int(parts[3])
 
-    chosen_date = datetime.strptime(chosen_date_str, "%Y-%m-%d").date()
+    try:
+        chosen_date = datetime.strptime(chosen_date_str, "%Y-%m-%d").date()
+    except ValueError:
+        await callback.answer("Некорректная дата.", show_alert=True)
+        return
 
     barbers = await db_requests.getBarbers()
     service = await db_requests.getServiceById(service_id)
+
     if not service:
         await callback.message.edit_text(
-            """Ошибка: выбранная услуга не найдена. Пожалуйста, начните заново.""",
+            "Ошибка: выбранная услуга не найдена. Пожалуйста, начните заново.",
             reply_markup=main_menu_keyboard
         )
         await callback.answer()
         return
 
-    if not barbers:
-        # Нет доступных мастеров — сразу к подтверждению с "Любым мастером"
-        # Эту логику тоже нужно будет исправить, чтобы передавать правильные данные
+    # Получаем список занятых мастеров в выбранную дату и время
+    busy_barber_ids = await db_requests.get_busy_barbers_by_datetime(chosen_date, chosen_time_str)
+
+    # Фильтруем доступных мастеров
+    available_barbers = [barber for barber in barbers if barber.id not in busy_barber_ids]
+
+    if not available_barbers:
+        # Если нет свободных мастеров — показываем карточку с "Любым мастером"
         final_card_text, final_card_keyboard = get_final_booking_card_content(
             service_name=service.name,
             chosen_date=chosen_date,
             chosen_time=chosen_time_str,
-            barber_name="Любой мастер"
+            barber_name="Любой мастер",
+            service_id=service_id,
+            barber_id=None
         )
         await callback.message.edit_text(final_card_text, reply_markup=final_card_keyboard)
     else:
-        # ИСПРАВЛЕНО: Передаем все необходимые данные в barbers_keyboard
+        # Показываем доступных мастеров для выбора
         await callback.message.edit_text(
-            """Выберите мастера:""",
-            reply_markup=barbers_keyboard(barbers, chosen_date_str, chosen_time_str, service_id)
+            "Выберите мастера:",
+            reply_markup=barbers_keyboard(available_barbers, chosen_date_str, chosen_time_str, service_id)
         )
+
     await callback.answer()
+
 
 
 @appointment_router.callback_query(F.data.startswith("chooseBarber_"))
@@ -256,6 +270,7 @@ async def handlerConfirmFinalBooking(callback: CallbackQuery):
 
         user_id = callback.from_user.id
 
+        # Сохраняем запись в БД
         new_booking = await db_requests.addBooking(
             user_id=user_id,
             service_id=service_id,
@@ -264,13 +279,15 @@ async def handlerConfirmFinalBooking(callback: CallbackQuery):
             booking_time=chosen_time
         )
 
+        # Получаем данные для подтверждения
         service = await db_requests.getServiceById(service_id)
-        barber_name = "любого мастера"
+        barber_name = "Любой мастер"
         if barber_id:
             barber = await db_requests.getBarberById(barber_id)
             if barber:
                 barber_name = barber.name
 
+        # Формируем текст подтверждения с HTML
         confirmation_text = (
             "✅ <b>Подтверждение записи</b>\n"
             "➖➖➖➖➖➖➖➖➖➖\n"
@@ -279,21 +296,21 @@ async def handlerConfirmFinalBooking(callback: CallbackQuery):
             f"<b>Время:</b> {chosen_time}\n"
             f"<b>Мастер:</b> {barber_name}\n"
             "➖➖➖➖➖➖➖➖➖➖\n"
-            "Пожалуйста, проверьте данные и подтвердите запись."
+            "Ваша запись успешно создана!"
         )
 
-        # Редактируем сообщение с подтверждением, без клавиатуры
+        # Редактируем сообщение с подтверждением
         await callback.message.edit_text(confirmation_text, parse_mode="HTML")
 
-        # Отправляем новое сообщение с ReplyKeyboardMarkup (обычной клавиатурой)
+        # Отправляем главное меню
         await callback.message.answer("Выберите действие из меню:", reply_markup=main_menu_keyboard)
 
     except (ValueError, IndexError) as e:
         print(f"Ошибка при обработке подтверждения: {e}")
         await callback.message.edit_text(
-            "Произошла ошибка при сохранении вашей записи. Пожалуйста, попробуйте еще раз.",
-            reply_markup=None
+            "Произошла ошибка при сохранении вашей записи. Пожалуйста, попробуйте еще раз."
         )
+
 
 
 
